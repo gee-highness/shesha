@@ -46,7 +46,7 @@ export class ExtrasBuilder {
     this.busShelters(); this.regSigns(); this.billboards(); this.typedSigns(); this.zebras(); this.furniture();
     this.speedSigns(scene);
     this.roundabouts(); this.footbridges(); this.animals();
-    this.viewpoints(); this.mavusoArch(); this.marketsAndRanks();
+    this.viewpoints(); this.mavusoArch(); this.marketsAndRanks(); this.boulders();
     this.flush();
   }
 
@@ -390,6 +390,27 @@ export class ExtrasBuilder {
         }
       }
     }
+  }
+
+  // ------------------------------------------------------------------ granite boulders
+  /** Weathered granite boulders on the steep hillsides around the city (the koppies behind every Manzini skyline photo). */
+  private boulders(): void {
+    const w = this.w, [x0, x1, z0, z1] = w.meta.bounds as number[], hsh = (a: number, b: number): number => ((Math.sin(a * 12.9898 + b * 78.233) * 43758.5453) % 1 + 1) % 1;
+    const H = (x: number, z: number): number => w.calculateRawTerrainHeight(x, z), cells = new Map<string, number[]>(), C = 1200;
+    for (let gx = x0 + 100; gx < x1 - 100; gx += 55) for (let gz = z0 + 100; gz < z1 - 100; gz += 55) {
+      const x = gx + (hsh(gx, gz) - 0.5) * 50, z = gz + (hsh(gz, gx) - 0.5) * 50; if (hsh(x * 0.7, z * 1.3) > 0.6) continue;
+      const slope = Math.max(Math.abs(H(x + 14, z) - H(x - 14, z)), Math.abs(H(x, z + 14) - H(x, z - 14))) / 28; if (slope < 0.2) continue;
+      if (w.roadAt(x, z) || w.nearBuilding(x, z) || w.nearestRoadSegment(x, z, 3)?.dist! < 14) continue;
+      const k = `${Math.floor(x / C)},${Math.floor(z / C)}`; let l = cells.get(k); if (!l) { l = []; cells.set(k, l); } l.push(x, z);
+    }
+    const geo = new THREE.IcosahedronGeometry(1, 0), mat = new THREE.MeshStandardMaterial({ color: 0x9a9084, roughness: 0.95, flatShading: true });
+    const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler();
+    cells.forEach((l, key) => {
+      const im = new THREE.InstancedMesh(geo, mat, l.length / 2); im.name = 'boulders'; im.castShadow = true;
+      for (let i = 0; i < l.length; i += 2) { const x = l[i], z = l[i + 1], s = 1.6 + hsh(x, z) * 4.2; e.set(hsh(x, 1) * 3, hsh(z, 2) * 6, hsh(x, z + 3) * 3); q.setFromEuler(e);
+        m4.compose(new THREE.Vector3(x, H(x, z) + s * 0.25, z), q, new THREE.Vector3(s * (1 + hsh(z, x) * 0.6), s * 0.75, s)); im.setMatrixAt(i / 2, m4); w.collision.addCircle(x, z, s * 0.9); }
+      im.computeBoundingSphere(); const [ix, iz] = key.split(',').map(Number); w.landmarksGroup.add(im); w.registerChunk(im, (ix + 0.5) * C, (iz + 0.5) * C, C * 0.75, 1600);
+    });
   }
 
   // ------------------------------------------------------------------ Mavuso gateway

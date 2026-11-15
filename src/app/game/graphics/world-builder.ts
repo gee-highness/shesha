@@ -841,7 +841,7 @@ export class WorldBuilder {
         if (sp === 2) return;                                                           // palm keeps its baked colours
         // Manzini's real street trees: green canopies, flamboyants (red-orange) and jacarandas (violet); blossom runs above 1 so it glows
         const hk = WorldBuilder.hash(t.x * 5, t.z * 7), sh = 0.85 + r * 0.3;
-        const pc = sp === 1 ? [0.16, 0.42, 0.2] : hk < 0.14 ? [1.4, 0.3, 0.1] : hk < 0.25 ? [0.72, 0.46, 1.35] : hk < 0.5 ? [0.24, 0.6, 0.22] : hk < 0.75 ? [0.34, 0.72, 0.26] : [0.2, 0.5, 0.24];
+        const pc = sp === 1 ? [0.16, 0.42, 0.2] : hk < 0.14 ? [1.4, 0.3, 0.1] : hk < 0.25 ? [0.72, 0.46, 1.35] : hk < 0.5 ? [0.16, 0.42, 0.17] : hk < 0.75 ? [0.23, 0.53, 0.2] : [0.12, 0.34, 0.16];
         col.setRGB(pc[0] * sh, pc[1] * sh, pc[2] * sh);
         im.setColorAt(i, col);
       });

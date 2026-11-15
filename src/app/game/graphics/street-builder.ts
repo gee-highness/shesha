@@ -180,7 +180,8 @@ export class StreetBuilder {
       const rd = w.nearestRoadSegment(x, z, 8); if (!rd || rd.dist > 40 || rd.way.dz || w.roadAt(x, z)) continue;
       const y = w.groundHeightAt(x, z), b = this.buf(x, z, 'props'), rot = Math.atan2(rd.tz, rd.tx);
       if (kind === 0) { this.box(b, x, y, z, 0.26, 8.4, 0.26, rot, wood); this.box(b, x, y + 7.6, z, 0.14, 0.14, 2.0, rot, arm); realUtil.push([x, z, y + 7.7]); }
-      else this.box(b, x, y, z, 0.16, 6.2, 0.16, rot, steel);
+      else { this.box(b, x, y, z, 0.16, 8.0, 0.16, rot, steel); this.box(b, x, y + 7.85, z, 0.1, 0.1, 3.4, rot, steel);   // twin-arm lamp as on Ngwane Street
+        for (const s of [-1.6, 1.6]) this.box(b, x - rd.tz * s, y + 7.72, z + rd.tx * s, 0.3, 0.1, 0.6, rot, [0.75, 0.95, 1]); }
       w.collision.addCircle(x, z, 0.2);
       const k = gk(x, z); let l = realGrid.get(k); if (!l) { l = []; realGrid.set(k, l); } l.push(x, z);
     }
@@ -258,7 +259,7 @@ export class StreetBuilder {
       if (w.roadAt(px, pz)) continue;
       const b = this.buf(px, pz, 'props'); const yy = w.calculateRawTerrainHeight(px, pz) + (way.sw ? StreetBuilder.PAVE_LIFT : 0) + w.roadLift(way.c);
       const rot = Math.atan2(tz, tx);
-      this.box(b, px, yy, pz, 0.16, 4.6, 0.16, rot, [0.25, 0.26, 0.28]); this.box(b, px, yy + 3.5, pz, 0.45, 1.15, 0.35, rot, [0.08, 0.08, 0.09]);
+      this.box(b, px, yy, pz, 0.16, 4.6, 0.16, rot, [0.25, 0.26, 0.28]); this.box(b, px, yy + 3.5, pz, 0.45, 1.15, 0.35, rot, [0.08, 0.08, 0.09]); this.box(b, px, yy + 3.36, pz, 0.8, 1.43, 0.1, rot, [0.95, 0.78, 0.1]);   // yellow backboard
       // lamps are animated by TrafficSignals (instanced), the pole and housing stay static
       w.collision.addCircle(px, pz, 0.2);
     }

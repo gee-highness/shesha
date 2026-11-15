@@ -355,7 +355,16 @@ export class CityBuilder {
     }
     const boost = st.wall === 'plaster' ? 1.0 : st.wall === 'concrete' ? 0.98 : st.wall === 'brick' ? 1.05 : 1.15;
     st.tint = st.tint.map((v) => v * boost);
-    const h = (hdm / 10) * this.neoHeight(cx, cz, area); const top = maxH + h;
+    // CBD from street-level photos: Bhunu Mall is red face-brick with SHOPRITE lettering on Nkoseluhlaza Street; a tan concrete
+    // "Manzini Shopping Mall" block and a glass office tower stand on Ngwane Street (those two positions are inferred); brick is common downtown
+    const isBhunu = use === 5 && area > 8000 && Math.hypot(cx + 490, cz - 30) < 60, isTan = area > 900 && Math.hypot(cx + 550, cz + 78) < 14, isGlass = use === 6 && Math.hypot(cx + 394, cz - 65) < 25;
+    if (isBhunu) { st.wall = 'brick'; st.tint = [0.7, 0.36, 0.28]; }
+    else if (isTan) { st.wall = 'concrete'; st.tint = [0.9, 0.72, 0.48]; st.roof = 'flat'; st.awn = true; }
+    else if (isGlass) { st.wall = 'concrete'; st.tint = [0.42, 0.56, 0.68]; st.win = 3; }
+    else if (use >= 3 && use <= 6 && this.inCbd(cx, cz) && (seed * 7) % 10 < 4) { st.wall = 'brick'; st.tint = pick(BRICK, r * 5.7); }
+    const h = isTan ? 14 : isGlass ? 30 : (hdm / 10) * this.neoHeight(cx, cz, area); const top = maxH + h;
+    if (isBhunu && !this.mallSign) { this.mallSign = true; this.paintedName(pts, cx, cz, top, /nkos/i, ['SHOPRITE'], '#8f4a3a', '#d21f26'); }
+    if (isTan && !this.tanSign) { this.tanSign = true; this.paintedName(pts, cx, cz, top, /ngwane/i, ['MANZINI', 'SHOPPING MALL'], '#c4ad86', '#2a2420'); }
     const wallBuf = this.buf(cx, cz, st.wall);
     const winCode = st.win + Math.min(0.99, r);
 
@@ -515,6 +524,23 @@ export class CityBuilder {
       if (d < bd) { bd = d; best = i; }
     }
     return best;
+  }
+
+  private mallSign = false; private tanSign = false;
+  /** Lettering fixed straight onto the wall that faces the named street, as on the real buildings. */
+  private paintedName(pts: [number, number][], cx: number, cz: number, top: number, street: RegExp, lines: string[], bg: string, fg: string): void {
+    const w = this.w, n = pts.length; let best = -1, bs = 1e9;
+    for (let i = 0; i < n; i++) { const a = pts[i], c = pts[(i + 1) % n], len = Math.hypot(c[0] - a[0], c[1] - a[1]); if (len < 14) continue;
+      const mx = (a[0] + c[0]) / 2, mz = (a[1] + c[1]) / 2, rd = w.nearestRoadSegment(mx, mz, 8); const s = (rd ? rd.dist : 200) - (rd && street.test(rd.way.n) ? 60 : 0) - len * 0.05; if (s < bs) { bs = s; best = i; } }
+    if (best < 0) return; const a = pts[best], c = pts[(best + 1) % n]; const mx = (a[0] + c[0]) / 2, mz = (a[1] + c[1]) / 2, len = Math.hypot(c[0] - a[0], c[1] - a[1]);
+    let nx = (c[1] - a[1]) / len, nz = -(c[0] - a[0]) / len; if (nx * (mx - cx) + nz * (mz - cz) < 0) { nx = -nx; nz = -nz; }
+    const cv = document.createElement('canvas'); cv.width = 1024; cv.height = 300; const g2 = cv.getContext('2d')!;
+    g2.fillStyle = bg; g2.fillRect(0, 0, 1024, 300); g2.fillStyle = fg; g2.textAlign = 'center'; g2.textBaseline = 'middle';
+    const fs = lines.length === 1 ? 190 : 118; g2.font = `900 ${fs}px sans-serif`; lines.forEach((t, i) => g2.fillText(t, 512, 150 + (i - (lines.length - 1) / 2) * fs * 1.08, 980));
+    const tex = new THREE.CanvasTexture(cv); tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = 4;
+    const wd = Math.min(20, len * 0.8), m = new THREE.Mesh(new THREE.PlaneGeometry(wd, wd * 0.293), new THREE.MeshStandardMaterial({ map: tex, roughness: 0.9, side: THREE.DoubleSide }));
+    m.position.set(mx + nx * 0.25, top - wd * 0.293 / 2 - 0.9, mz + nz * 0.25); m.rotation.y = Math.atan2(nx, nz); m.name = 'wall-name';
+    w.landmarksGroup.add(m); w.registerChunk(m, mx, mz, 12, 600);
   }
 
   private awning(b: GeoBuf, pts: [number, number][], i: number, hs: number[], r: number): void {
