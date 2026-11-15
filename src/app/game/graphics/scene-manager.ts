@@ -249,7 +249,7 @@ export class SceneManager {
     const wb = this.worldBuilder, mark = wb.markMat, asph = wb.asphMat;
     if (mark) { mark.emissive.setRGB(0.1, 0.9, 1.0); mark.emissiveMap = this.neo ? mark.map : null; mark.emissiveIntensity = this.neo ? 1.6 : 0; mark.needsUpdate = true; }
     if (asph) { asph.color.setScalar(this.neo ? 0.55 : 1); asph.needsUpdate = true; }
-    this.hemiLight.color.set(this.neo ? 0x8a6bff : 0xbae6fd); this.hemiLight.groundColor.set(this.neo ? 0x1a0b3a : 0x854d0e);
+    this.hemiLight.color.set(this.neo ? 0xa9c8ff : 0xbae6fd); this.hemiLight.groundColor.set(this.neo ? 0x4a3024 : 0x854d0e);
     if (!this.neo && wb.city) wb.city.neo.value = 0;
   }
 
@@ -283,11 +283,11 @@ export class SceneManager {
     const gloomK = env.weather === 'TROPICAL_RAIN' ? 0.18 : env.weather === 'OVERCAST' ? 0.45 : env.weather === 'MIST' ? 0.55 : 1;
     this.skyGloom = 1 - gloomK; this.skyCover = env.weather === 'SUNNY' ? 0.5 : env.weather === 'MIST' ? 0.7 : 0.95;
     const pal = skyPalette(sd.y, gloomK, this.neo, this.pal);
-    const day = pal.day * (this.neo ? 0.75 : 1);
+    const day = pal.day * (this.neo ? 0.92 : 1);
     const gloom = 0.45 + 0.55 * gloomK;
     // sun: warm key from the palette; shadows from it only when it is above the horizon
     this.sunLight.position.set(sd.x * 400, Math.max(40, sd.y * 400), sd.z * 400);
-    this.sunLight.color.copy(pal.sun); this.sunLight.intensity = pal.sunI * (sd.y > -0.02 ? 1 : 0) * gloom * gloom * (this.neo ? 0.6 : 1);
+    this.sunLight.color.copy(pal.sun); this.sunLight.intensity = pal.sunI * (sd.y > -0.02 ? 1 : 0) * gloom * gloom * (this.neo ? 0.88 : 1);
     // ambient: sky colour above, warm bounce below; cool rim light opposite the sun for the stylised edge glow
     this.hemiLight.color.copy(pal.zenith).lerp(new THREE.Color(1, 1, 1), 0.82);   // skylight is nearly white: walls must not turn blue this.hemiLight.groundColor.copy(pal.horizon).multiplyScalar(0.42).lerp(new THREE.Color(0.35, 0.26, 0.2), 0.3);
     const dark = Math.pow(day, 1.4); this.hemiLight.intensity = 0.045 + 0.85 * dark;                 // nights are properly dark: only faint moonlight

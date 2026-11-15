@@ -149,7 +149,7 @@ export class CityBuilder {
           vec3 neonCol = mix(vec3(0.1,0.9,1.0), vec3(1.0,0.22,0.8), step(0.62, h11(sd*37.0 + 3.0)));
           glassCol = mix(glassCol, mix(vec3(0.02,0.05,0.09), vec3(0.05,0.3,0.45), glass*0.7 + 0.25), uNeo);
           float lit = step(mix(0.78, 0.3, uNeo), h11(bi*13.1 + fl*7.7 + sd*91.0)) * max(uNight, uNeo) * win;
-          diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * 0.3 + vec3(0.015,0.025,0.045), uNeo * (1.0 - win));
+          diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * 0.74 + vec3(0.0,0.012,0.03), uNeo * (1.0 - win));
           diffuseColor.rgb = mix(diffuseColor.rgb, glassCol, win * 0.92);
           diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.5,0.5,0.52), mull * 0.6 * step(0.5, st));
           diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.13,0.08,0.06), door * 0.9);
@@ -172,11 +172,11 @@ export class CityBuilder {
     };
   }
 
-  /** Neo theme only (decided when a chunk is generated): taller towers where the OSM footprint density is high. */
+  /** Neo theme only (decided when a chunk is generated): a slight lift for big CBD blocks; the real massing stays. */
   private neoHeight(cx: number, cz: number, area: number): number {
     if (typeof localStorage === 'undefined' || localStorage.getItem('shesha.theme') === 'REAL') return 1;
     const l = this.pending.get(`${Math.floor(cx / CH)},${Math.floor(cz / CH)}`); const density = l ? l.length : 0;
-    return 1 + Math.min(3.4, density / 190) * Math.min(1, Math.sqrt(area) / 12);
+    return 1 + Math.min(0.3, density / 900) * Math.min(1, Math.sqrt(area) / 12);   // Manzini is low-rise (2-8 floors): keep the real skyline
   }
 
   // ------------------------------------------------------------------ main

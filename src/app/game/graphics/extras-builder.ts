@@ -46,7 +46,7 @@ export class ExtrasBuilder {
     this.busShelters(); this.regSigns(); this.billboards(); this.typedSigns(); this.zebras(); this.furniture();
     this.speedSigns(scene);
     this.roundabouts(); this.footbridges(); this.animals();
-    this.viewpoints();
+    this.viewpoints(); this.mavusoArch();
     this.flush();
   }
 
@@ -357,6 +357,29 @@ export class ExtrasBuilder {
       const b = this.buf(v.p[0], v.p[1], 'props');
       this.box(b, v.p[0], y, v.p[1], 0.25, 0.25, 22, 1, 0, [0.13, 0.83, 0.93]); // a tall cyan marker pole you can spot from the road
     }
+  }
+
+  // ------------------------------------------------------------------ Mavuso gateway
+  /** The blue / silver / red gateway arch over the Mavuso Trade Centre entrance road (Manzini's best-known landmark), with a light-strip edge. */
+  private mavusoArch(): void {
+    const w = this.w, X = -1079, Z = -712; if (X < w.meta.bounds[0] || X > w.meta.bounds[1]) return;
+    const ring = (r0: number, r1: number, a0: number, a1: number, depth: number, col: number, em = 0): THREE.Mesh => {
+      const s = new THREE.Shape(); s.absarc(0, 0, r1, a0, a1, false); s.absarc(0, 0, r0, a1, a0, true); s.closePath();
+      const g = new THREE.ExtrudeGeometry(s, { depth, bevelEnabled: false, curveSegments: 20 }); g.translate(0, 0, -depth / 2);
+      return new THREE.Mesh(g, new THREE.MeshStandardMaterial({ color: col, roughness: 0.45, metalness: 0.35, emissive: em ? col : 0, emissiveIntensity: em, flatShading: true }));
+    };
+    const grp = new THREE.Group(), PI = Math.PI;
+    grp.add(ring(11, 14, 0, PI, 2.4, 0x1f2fa8));                       // royal-blue arch
+    grp.add(ring(13.2, 14.6, PI * 0.31, PI * 0.69, 2.8, 0xc9ced6));    // brushed-silver crown
+    grp.add(ring(10.5, 11.2, PI * 0.2, PI * 0.8, 2.6, 0xb81d24));      // red inner band
+    grp.add(ring(14.6, 14.85, 0, PI, 0.5, 0x22d3ee, 2.2));             // light-strip edge
+    for (const sx of [-1, 1]) {
+      const foot = new THREE.Mesh(new THREE.BoxGeometry(4.2, 5, 3.4), new THREE.MeshStandardMaterial({ color: 0x9aa0a8, roughness: 0.6, metalness: 0.3, flatShading: true })); foot.position.set(sx * 12.5, 2.5, 0); grp.add(foot);
+      const plinth = new THREE.Mesh(new THREE.BoxGeometry(6, 2.2, 3), new THREE.MeshStandardMaterial({ color: 0x8f2f2a, roughness: 0.8, flatShading: true })); plinth.position.set(sx * 19, 1.1, 1.5); grp.add(plinth);   // brick statue plinths
+      w.collision.addCircle(X + sx * 12.5, Z, 2.4); w.collision.addCircle(X + sx * 19, Z + 1.5, 2.6);
+    }
+    grp.position.set(X, Math.min(w.groundHeightAt(X - 12.5, Z), w.groundHeightAt(X + 12.5, Z)) - 0.4, Z);
+    grp.traverse((o) => { o.castShadow = true; }); w.landmarksGroup.add(grp); w.registerChunk(grp, X, Z, 30, 1200);
   }
 
   // ------------------------------------------------------------------ emit

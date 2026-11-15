@@ -804,15 +804,15 @@ export class WorldBuilder {
     const trunk = new THREE.CylinderGeometry(0.2, 0.32, 3.2, 5); trunk.translate(0, 1.6, 0);
     const mkCanopy = (r: number, y: number) => { const g = new THREE.IcosahedronGeometry(r, 0); g.translate(0, y, 0); return g; };
     const paint = (g: THREE.BufferGeometry, c: THREE.Color) => { const a = new Float32Array(g.attributes['position'].count * 3); for (let i = 0; i < a.length; i += 3) { a[i] = c.r; a[i + 1] = c.g; a[i + 2] = c.b; } g.setAttribute('color', new THREE.BufferAttribute(a, 3)); return g.toNonIndexed(); };
-    const geo = mergeGeometries([paint(trunk, new THREE.Color(1.2, 0.5, 0.85)), paint(mkCanopy(2.4, 4.4), new THREE.Color(0xffffff)), paint(mkCanopy(1.7, 5.8), new THREE.Color(0xffffff))].map((g) => { g.deleteAttribute('uv'); return g; }))!;
+    const geo = mergeGeometries([paint(trunk, new THREE.Color(0.5, 0.36, 0.27)), paint(mkCanopy(2.4, 4.4), new THREE.Color(0xffffff)), paint(mkCanopy(1.7, 5.8), new THREE.Color(0xffffff))].map((g) => { g.deleteAttribute('uv'); return g; }))!;
     // conifer / eucalyptus-pine (tall, narrow, stacked cones) and palm (slender trunk + flat fan crown): species vary by altitude and place
     const cone = (r: number, h: number, y: number) => { const g = new THREE.ConeGeometry(r, h, 6); g.translate(0, y, 0); return g; };
-    const geoCon = mergeGeometries([paint(trunk, new THREE.Color(3.4, 1.0, 2.2)), paint(cone(2.0, 3.4, 4.2), new THREE.Color(0xffffff)), paint(cone(1.5, 3.0, 6.0), new THREE.Color(0xffffff)), paint(cone(1.0, 2.6, 7.6), new THREE.Color(0xffffff))].map((g) => { g.deleteAttribute('uv'); return g; }))!;
+    const geoCon = mergeGeometries([paint(trunk, new THREE.Color(0.5, 0.36, 0.27)), paint(cone(2.0, 3.4, 4.2), new THREE.Color(0xffffff)), paint(cone(1.5, 3.0, 6.0), new THREE.Color(0xffffff)), paint(cone(1.0, 2.6, 7.6), new THREE.Color(0xffffff))].map((g) => { g.deleteAttribute('uv'); return g; }))!;
     const ptrunk = new THREE.CylinderGeometry(0.14, 0.22, 7.2, 5); ptrunk.translate(0, 3.6, 0);
     const crown = new THREE.ConeGeometry(2.8, 1.1, 7); crown.translate(0, 7.6, 0);
     const crown2 = new THREE.ConeGeometry(1.5, 0.9, 7); crown2.translate(0, 8.2, 0);
     const geoPalm = mergeGeometries([paint(ptrunk, new THREE.Color(0x8d7d5e)), paint(crown, new THREE.Color(0x3f7d2c)), paint(crown2, new THREE.Color(0x4f9236))].map((g) => { g.deleteAttribute('uv'); return g; }))!;
-    const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.5, metalness: 0.2, flatShading: true, emissive: 0x0a1a2a });   // holo-trees: bioluminescent canopies
+    const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.5, metalness: 0.2, flatShading: true, emissive: 0x04100a });
     const TCH = 300;   // tree cells: small enough that distant trees really drop out (was one 800 m block)
     const sn = this.meta.snaps as Record<string, [number, number]> | undefined;
     const cbd = (x: number, z: number): boolean => !!sn && ['manzini', 'matsapha'].some((k) => sn[k] && Math.hypot(sn[k][0] - x, sn[k][1] - z) < 900);
@@ -839,9 +839,10 @@ export class WorldBuilder {
         im.setMatrixAt(i, m4);
         const r = WorldBuilder.hash(t.x * 2, t.z * 3);
         if (sp === 2) return;                                                           // palm keeps its baked colours
-        // futuristic canopies: teal, electric blue, violet and magenta glow (values above 1 read as lit)
-        const pal = [[0.1, 1.25, 1.05], [0.35, 0.7, 1.5], [0.85, 0.4, 1.4], [1.4, 0.3, 0.95], [0.3, 1.35, 0.6]], pc = pal[Math.floor(WorldBuilder.hash(t.x * 5, t.z * 7) * pal.length) % pal.length];
-        if (sp === 1) col.setRGB(pc[0] * 0.8, pc[1] * 0.8, pc[2] * 0.8); else col.setRGB(pc[0] * (0.85 + r * 0.3), pc[1] * (0.85 + r * 0.3), pc[2] * (0.85 + r * 0.3));
+        // Manzini's real street trees: green canopies, flamboyants (red-orange) and jacarandas (violet); blossom runs above 1 so it glows
+        const hk = WorldBuilder.hash(t.x * 5, t.z * 7), sh = 0.85 + r * 0.3;
+        const pc = sp === 1 ? [0.16, 0.42, 0.2] : hk < 0.14 ? [1.4, 0.3, 0.1] : hk < 0.25 ? [0.72, 0.46, 1.35] : hk < 0.5 ? [0.24, 0.6, 0.22] : hk < 0.75 ? [0.34, 0.72, 0.26] : [0.2, 0.5, 0.24];
+        col.setRGB(pc[0] * sh, pc[1] * sh, pc[2] * sh);
         im.setColorAt(i, col);
       });
       im.userData['far'] = 380; im.computeBoundingSphere();

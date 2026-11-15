@@ -19,7 +19,7 @@ export function skyPalette(sunY: number, gloom: number, neo: boolean, out: SkyPa
   mix3(a.z, b.z, t, out.zenith); mix3(a.h, b.h, t, out.horizon); mix3(a.s, b.s, t, out.sun); out.sunI = a.i + (b.i - a.i) * t;
   out.day = THREE.MathUtils.smoothstep(sunY, -0.12, 0.3);
   if (gloom < 1) { const g = new THREE.Color(0.33, 0.36, 0.44).multiplyScalar(0.25 + 0.75 * out.day); out.zenith.lerp(g, 1 - gloom); out.horizon.lerp(g.multiplyScalar(1.25), (1 - gloom) * 0.9); }
-  if (neo) { out.zenith.multiply(new THREE.Color(0.9, 0.6, 1.5)); out.horizon.lerp(new THREE.Color(0.95, 0.28, 0.85), 0.35 * (0.4 + out.day * 0.6)); out.sun.lerp(new THREE.Color(1, 0.6, 0.95), 0.4); }
+  if (neo) { out.zenith.multiply(new THREE.Color(0.8, 0.88, 1.28)); out.horizon.lerp(new THREE.Color(0.62, 0.8, 1.0), 0.25 * (0.4 + out.day * 0.6)); out.sun.lerp(new THREE.Color(1, 0.86, 0.95), 0.25); }
   return out;
 }
 
