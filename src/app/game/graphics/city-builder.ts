@@ -522,7 +522,7 @@ export class CityBuilder {
     const nx = dz / len, nz = -dx / len, tx = dx / len, tz = dz / len;
     const vera = this.inCbd(a[0], a[1]) && len >= 6;                       // town-centre shop rows: continuous verandah over the pavement, posts at the kerb
     const wdt = vera ? Math.min(len * 0.98, 30) : Math.min(len * 0.9, 12), s0 = (len - wdt) / 2;
-    const col = vera ? [0.45, 0.47, 0.5] : pick(AWNING, r * 5.3), y = (hs[i] + hs[(i + 1) % n]) / 2;
+    const col = vera ? pick([[0.1, 0.42, 0.24], [0.86, 0.82, 0.7], [0.7, 0.6, 0.46], [0.45, 0.47, 0.5]], r * 7.1) : pick(AWNING, r * 5.3), y = (hs[i] + hs[(i + 1) % n]) / 2;
     const p0: [number, number] = [a[0] + tx * s0, a[1] + tz * s0], p1: [number, number] = [p0[0] + tx * wdt, p0[1] + tz * wdt];
     const out = vera ? 3.0 : 1.7, yh = y + 3.0, yl = y + 2.55;
     const sn = [nx * 0.45, 0.89, nz * 0.45], sl = Math.hypot(sn[0], sn[1], sn[2]);

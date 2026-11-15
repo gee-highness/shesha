@@ -46,7 +46,7 @@ export class ExtrasBuilder {
     this.busShelters(); this.regSigns(); this.billboards(); this.typedSigns(); this.zebras(); this.furniture();
     this.speedSigns(scene);
     this.roundabouts(); this.footbridges(); this.animals();
-    this.viewpoints(); this.mavusoArch();
+    this.viewpoints(); this.mavusoArch(); this.marketsAndRanks();
     this.flush();
   }
 
@@ -359,10 +359,43 @@ export class ExtrasBuilder {
     }
   }
 
+  // ------------------------------------------------------------------ markets and bus ranks
+  /** Manzini Market stalls (brick counters under green tin canopies, yellow umbrellas) and the long green-and-yellow bus rank shelters. */
+  private marketsAndRanks(): void {
+    const w = this.w, green = [0.1, 0.42, 0.24], yellow = [0.95, 0.78, 0.14], brick = [0.72, 0.4, 0.3], post = [0.16, 0.3, 0.2], neon = [0.13, 0.83, 0.93];
+    const free = (x: number, z: number): boolean => !w.roadAt(x, z) && !w.nearBuilding(x, z);
+    for (const p of w.meta.pois ?? []) {
+      if (p.k !== 'marketplace' && p.k !== 'bus_station') continue;
+      const [cx, cz] = p.p; const rd = w.nearestRoadSegment(cx, cz, 6); const tx = rd ? rd.tx : 1, tz = rd ? rd.tz : 0, nx = -tz, nz = tx;
+      const at = (a: number, s: number): [number, number] => [cx + tx * a + nx * s, cz + tz * a + nz * s];
+      if (p.k === 'marketplace') {
+        for (let i = -3; i <= 3; i++) for (let j = -2; j <= 2; j++) {
+          const [x, z] = at(i * 4.4, j * 5.6); if (!free(x, z) || !free(x + tx * 1.6, z + tz * 1.6) || !free(x - tx * 1.6, z - tz * 1.6)) continue;
+          const y = w.groundHeightAt(x, z) - 0.05, b = this.buf(x, z, 'props');
+          this.box(b, x, y, z, 3.0, 1.1, 0.9, tx, tz, brick);                                                   // brick counter
+          for (const [a, s] of [[-1.5, -1.2], [1.5, -1.2], [-1.5, 1.2], [1.5, 1.2]]) this.box(b, x + tx * a + nx * s, y, z + tz * a + nz * s, 0.1, 0.1, 2.5, tx, tz, post);
+          this.box(b, x, y + 2.5, z, 3.6, 3.0, 0.14, tx, tz, green);                                            // green tin canopy
+          this.box(b, x, y + 2.36, z, 3.62, 3.02, 0.06, tx, tz, neon);                                          // light-strip under the eave
+          w.collision.addCircle(x, z, 1.3);
+          if (((Math.sin(x * 12.9898 + z * 78.233) * 43758.5453) % 1 + 1) % 1 < 0.45) { const [ux, uz] = [x + nx * 2.8, z + nz * 2.8]; if (free(ux, uz)) { this.box(b, ux, y, uz, 0.07, 0.07, 2.1, tx, tz, [0.6, 0.6, 0.6]); this.box(b, ux, y + 2.0, uz, 2.0, 2.0, 0.12, 0.707, 0.707, yellow); } }   // traders' umbrella
+        }
+      } else {
+        for (let j = -1; j <= 1; j++) {
+          const [x, z] = at(0, j * 13); const y = w.groundHeightAt(x, z) - 0.05, b = this.buf(x, z, 'props'); let ok = 0;
+          for (let i = -3; i <= 3; i++) { const [px, pz] = at(i * 4.4, j * 13); if (!free(px, pz)) continue; ok++; this.box(b, px, y, pz, 0.22, 0.22, 3.6, tx, tz, post); w.collision.addCircle(px, pz, 0.2); }
+          if (ok < 4) continue;
+          this.box(b, x, y + 3.6, z, 28, 5.2, 0.18, tx, tz, green);                                             // long tin canopy
+          for (const s of [-2.65, 2.65]) { this.box(b, x + nx * s, y + 3.2, z + nz * s, 28, 0.1, 0.5, tx, tz, yellow); this.box(b, x + nx * s, y + 3.1, z + nz * s, 28, 0.12, 0.08, tx, tz, neon); }   // yellow fascia + light strip
+          this.box(b, x, y, z, 26, 0.5, 0.45, tx, tz, [0.7, 0.68, 0.62]);                                       // waiting bench plinth
+        }
+      }
+    }
+  }
+
   // ------------------------------------------------------------------ Mavuso gateway
   /** The blue / silver / red gateway arch over the Mavuso Trade Centre entrance road (Manzini's best-known landmark), with a light-strip edge. */
   private mavusoArch(): void {
-    const w = this.w, X = -1079, Z = -712; if (X < w.meta.bounds[0] || X > w.meta.bounds[1]) return;
+    const w = this.w, X = -1079, Z = -727; if (X < w.meta.bounds[0] || X > w.meta.bounds[1]) return;
     const ring = (r0: number, r1: number, a0: number, a1: number, depth: number, col: number, em = 0): THREE.Mesh => {
       const s = new THREE.Shape(); s.absarc(0, 0, r1, a0, a1, false); s.absarc(0, 0, r0, a1, a0, true); s.closePath();
       const g = new THREE.ExtrudeGeometry(s, { depth, bevelEnabled: false, curveSegments: 20 }); g.translate(0, 0, -depth / 2);

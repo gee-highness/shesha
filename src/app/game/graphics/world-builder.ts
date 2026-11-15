@@ -862,7 +862,7 @@ export class WorldBuilder {
     return false;
   }
 
-  private nearBuilding(x: number, z: number): boolean {
+  public nearBuilding(x: number, z: number): boolean {
     const cx = Math.floor(x / 40), cz = Math.floor(z / 40);
     for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) {
       const l = this.bGrid.get((cx + a) * 100003 + (cz + b)); if (!l) continue;
