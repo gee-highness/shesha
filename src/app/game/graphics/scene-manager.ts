@@ -247,7 +247,7 @@ export class SceneManager {
   public setTheme(t: 'REAL' | 'NEO'): void {
     this.neo = t === 'NEO';
     const wb = this.worldBuilder, mark = wb.markMat, asph = wb.asphMat;
-    if (mark) { mark.emissive.setRGB(0.1, 0.9, 1.0); mark.emissiveMap = this.neo ? mark.map : null; mark.emissiveIntensity = this.neo ? 1.6 : 0; mark.needsUpdate = true; }
+    if (mark) { mark.emissive.setRGB(0.1, 0.9, 1.0); mark.emissiveMap = this.neo ? mark.map : null; mark.emissiveIntensity = this.neo ? 0.55 : 0; mark.needsUpdate = true; }
     if (asph) { asph.color.setScalar(this.neo ? 0.55 : 1); asph.needsUpdate = true; }
     this.hemiLight.color.set(this.neo ? 0xa9c8ff : 0xbae6fd); this.hemiLight.groundColor.set(this.neo ? 0x4a3024 : 0x854d0e);
     if (!this.neo && wb.city) wb.city.neo.value = 0;

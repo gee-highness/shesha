@@ -130,7 +130,7 @@ export class CityBuilder {
           float st = min(floor(vWin + 0.001), 7.0), sd = floor(fract(vWin) * 1000.0 + 0.5) / 1000.0;
           float bay = fract(vWUv.x), flr = fract(vWUv.y), fl = floor(vWUv.y), bi = floor(vWUv.x);
           float win = 0.0, door = 0.0, mull = 0.0, glass = 0.0, trim = 0.0, sill = 0.0, lintel = 0.0, frame = 0.0;
-          if (st > 0.5) {
+          if (st > 0.5 && vWUv.y >= 0.0) {
             // baked mask atlas: 8 styles across, ground floor / upper floor rows; R=window G=glass B=mullion A=door zone
             vec2 tuv = vec2((st + clamp(bay, 0.008, 0.992)) / 8.0, (min(fl, 1.0) + clamp(flr, 0.008, 0.992)) / 2.0);
             vec4 wm = textureGrad(uWinAtlas, tuv, dFdx(vWUv) * vec2(0.125, 0.5), dFdy(vWUv) * vec2(0.125, 0.5));
@@ -148,14 +148,14 @@ export class CityBuilder {
           vec3 glassCol = mix(vec3(0.05,0.08,0.11), vec3(0.16,0.3,0.36), glass * 0.8);
           vec3 neonCol = mix(vec3(0.1,0.9,1.0), vec3(1.0,0.22,0.8), step(0.62, h11(sd*37.0 + 3.0)));
           glassCol = mix(glassCol, mix(vec3(0.02,0.05,0.09), vec3(0.05,0.3,0.45), glass*0.7 + 0.25), uNeo);
-          float lit = step(mix(0.78, 0.3, uNeo), h11(bi*13.1 + fl*7.7 + sd*91.0)) * max(uNight, uNeo) * win;
+          float lit = step(mix(0.78, 0.5, uNeo), h11(bi*13.1 + fl*7.7 + sd*91.0)) * max(uNight, uNeo * 0.14) * win;
           diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * 0.74 + vec3(0.0,0.012,0.03), uNeo * (1.0 - win));
           diffuseColor.rgb = mix(diffuseColor.rgb, glassCol, win * 0.92);
           diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.5,0.5,0.52), mull * 0.6 * step(0.5, st));
           diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.13,0.08,0.06), door * 0.9);
           // architectural detail: window frames, painted trim, projecting sills (lit top, shadowed underside), lintels, floor slab bands, ground-floor grime, sky reflection
           diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.16,0.17,0.19), frame * 0.85 * step(0.5, st));
-          diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.93,0.91,0.86), trim * 0.55 * (1.0 - win) * step(0.5, st) * (1.0 - uNeo));
+          diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.93,0.91,0.86), trim * 0.55 * (1.0 - win) * step(0.5, st) * (1.0 - uNeo * 0.35));
           diffuseColor.rgb *= 1.0 - 0.28 * lintel * (1.0 - win) * step(0.5, st);
           diffuseColor.rgb *= 1.0 + 0.14 * sill * (1.0 - win) * step(0.5, st);
           float slabBand = (1.0 - smoothstep(0.0, 0.035, abs(flr - 0.015))) * step(1.0, vWUv.y) * (1.0 - win);
@@ -163,12 +163,12 @@ export class CityBuilder {
           float baseG = 1.0 - smoothstep(0.0, 0.42, vWUv.y);
           diffuseColor.rgb *= 1.0 - baseG * (0.3 + 0.2 * h11(bi * 5.3 + sd * 17.0));
           float refl = smoothstep(0.35, 0.95, fract(bay * 0.7 + flr * 0.6 + sd * 3.0));
-          diffuseColor.rgb += vec3(0.2, 0.32, 0.4) * refl * win * (0.3 + 0.7 * glass) * (1.0 - uNight * 0.85) * (1.0 - uNeo);`)
+          diffuseColor.rgb += vec3(0.2, 0.32, 0.4) * refl * win * (0.3 + 0.7 * glass) * (1.0 - uNight * 0.85) * (1.0 - uNeo * 0.25);`)
         .replace('#include <roughnessmap_fragment>', `#include <roughnessmap_fragment>
           roughnessFactor = mix(roughnessFactor, 0.05, win * 0.9);`)
         .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
           totalEmissiveRadiance += lit * mix(vec3(1.0, 0.72, 0.36), neonCol, uNeo) * 0.95;
-          totalEmissiveRadiance += uNeo * smoothstep(0.92, 0.985, flr) * neonCol * 1.3 * step(0.5, st);`);
+          totalEmissiveRadiance += uNeo * smoothstep(0.955, 0.99, flr) * step(0.0, vWUv.y) * neonCol * mix(0.3, 1.3, uNight) * step(0.5, st);`);
     };
   }
 
@@ -373,10 +373,10 @@ export class CityBuilder {
     for (let i = 0; i < n; i++) {
       const a = pts[i], c = pts[(i + 1) % n]; const dx = c[0] - a[0], dz = c[1] - a[1]; const len = Math.hypot(dx, dz); if (len < 0.2) continue;
       const nx = dz / len, nz = -dx / len, ya = hs[i] - 0.5, yb = hs[(i + 1) % n] - 0.5, u0 = u / 3, u1 = (u + len) / 3; u += len;
-      const i0 = wallBuf.vert(a[0], ya, a[1], nx, 0, nz, u0, 0, st.tint, winCode);
-      const i1 = wallBuf.vert(c[0], yb, c[1], nx, 0, nz, u1, 0, st.tint, winCode);
-      const i2 = wallBuf.vert(c[0], top, c[1], nx, 0, nz, u1, (top - yb) / 3.2, st.tint, winCode);
-      const i3 = wallBuf.vert(a[0], top, a[1], nx, 0, nz, u0, (top - ya) / 3.2, st.tint, winCode);
+      const i0 = wallBuf.vert(a[0], ya, a[1], nx, 0, nz, u0, (ya - maxH) / 3.2, st.tint, winCode);
+      const i1 = wallBuf.vert(c[0], yb, c[1], nx, 0, nz, u1, (yb - maxH) / 3.2, st.tint, winCode);
+      const i2 = wallBuf.vert(c[0], top, c[1], nx, 0, nz, u1, (top - maxH) / 3.2, st.tint, winCode);
+      const i3 = wallBuf.vert(a[0], top, a[1], nx, 0, nz, u0, (top - maxH) / 3.2, st.tint, winCode);
       wallBuf.tri(i0, i2, i1); wallBuf.tri(i0, i3, i2);
     }
 
