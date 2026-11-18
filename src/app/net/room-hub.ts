@@ -46,7 +46,7 @@ export class RoomHub {
     if (m['t'] === 'join' && !me) {
       if (this.members.size >= MAX) { if (c.link) { c.link.send(JSON.stringify({ t: 'error', msg: 'Room is full' })); setTimeout(() => c.link?.close(), 200); } else this.localRx({ t: 'error', msg: 'Room is full' }); return; }
       const id = this.nextId++;
-      const p: Member = { id, link: c.link, name: clean(m['name'], 16) || `Driver${id}`, car: clean(m['car'], 32) || 'ferrari', color: colour(m['color']) ? m['color'] : '#ef4444', pose: null, dirty: false };
+      const p: Member = { id, link: c.link, name: clean(m['name'], 16) || `Driver${id}`, car: clean(m['car'], 32) || 'race', color: colour(m['color']) ? m['color'] : '#ef4444', pose: null, dirty: false };
       c.me = p; this.members.set(id, p);
       this.send(p, { t: 'welcome', id, room: this.code, peers: [...this.members.values()].filter((x) => x !== p).map(this.info) });
       this.cast({ t: 'join', peer: this.info(p) }, id);

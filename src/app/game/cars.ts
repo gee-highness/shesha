@@ -5,13 +5,10 @@ import { CarKind, carSize, wheelSpots } from './graphics/car-gen';
 export type CarClass = 'Local' | 'Sports' | 'Race' | 'Everyday' | 'SUV' | 'Van & Truck' | 'Service' | 'Farm' | 'Kart';
 
 export interface CarDef {
-  id: string; name: string; cls: CarClass; file: string; archetype: VehicleArchetypeId;
-  /** Model faces -Z (three.js Ferrari) instead of +Z (Kenney). */
-  flip?: boolean; paintable?: boolean; blurb: string;
-  /** Wheel nodes in order FL, FR, RL, RR. */
-  wheels: [string, string, string, string];
-  /** Generated body (car-gen.ts) instead of a glTF file: drawn at true size, wheelbase / track come from the body. */
-  gen?: CarKind;
+  id: string; name: string; cls: CarClass; archetype: VehicleArchetypeId;
+  paintable?: boolean; blurb: string;
+  /** Generated body (car-gen.ts): drawn at true size, wheelbase / track come from the body. */
+  gen: CarKind;
   /** Waist stripe colour for generated bodies (minibus taxi, coach). */
   stripe?: number;
   /** Fixed paint for generated bodies that are not paintable. */
@@ -19,26 +16,20 @@ export interface CarDef {
   /** This car's own figures on top of its archetype (mass, power, drive, grip, size, gearing). */
   spec: Partial<VehicleArchetypeConfig>;
 }
-const K: [string, string, string, string] = ['wheel-front-left', 'wheel-front-right', 'wheel-back-left', 'wheel-back-right'];
 type Drive = 'AWD' | 'RWD' | 'FWD';
-/** mass kg, power kW, drive, tyre grip, wheelbase m (sets the model's size), track m, + any other figure. */
-const sp = (massKg: number, engineMaxPowerKw: number, driveType: Drive, tireGripPeak: number, wheelBaseM: number, trackWidthM: number, more: Partial<VehicleArchetypeConfig> = {}): Partial<VehicleArchetypeConfig> =>
-  ({ massKg, engineMaxPowerKw, driveType, tireGripPeak, wheelBaseM, trackWidthM, ...more });
 /** Rev range + gearing shorthand: peak rpm, limiter, final drive, drag. */
 const rev = (enginePeakRpm: number, engineMaxRpm: number, finalDrive: number, dragCoefficient: number, more: Partial<VehicleArchetypeConfig> = {}): Partial<VehicleArchetypeConfig> =>
   ({ enginePeakRpm, engineMaxRpm, finalDrive, dragCoefficient, ...more });
 const ROAD = rev(5800, 6600, 4.1, 0.34), DIESEL = rev(3600, 4400, 3.9, 0.42), LORRY = rev(2400, 3000, 3.7, 0.62, { engineIdleRpm: 650 }), KART = rev(9500, 11500, 12, 0.5, { engineIdleRpm: 1800, suspensionRestLengthM: 0.3 });
-const c = (id: string, name: string, cls: CarClass, archetype: VehicleArchetypeId, blurb: string, spec: Partial<VehicleArchetypeConfig>, extra: Partial<CarDef> = {}): CarDef =>
-  ({ id, name, cls, file: `assets/models/cars/${id}.glb`, archetype, blurb, wheels: K, spec, ...extra });
 /** A generated Southern-African body: true-size, wheelbase / track read from the shape. */
 const g = (id: string, name: string, gen: CarKind, archetype: VehicleArchetypeId, blurb: string, massKg: number, engineMaxPowerKw: number, driveType: Drive, tireGripPeak: number, more: Partial<VehicleArchetypeConfig> = {}, extra: Partial<CarDef> = {}): CarDef =>
-  ({ id, name, cls: 'Local', file: '', archetype, blurb, wheels: K, gen, paintable: true, spec: { massKg, engineMaxPowerKw, driveType, tireGripPeak, ...more }, ...extra });
+  ({ id, name, cls: 'Local', archetype, blurb, gen, paintable: true, spec: { massKg, engineMaxPowerKw, driveType, tireGripPeak, ...more }, ...extra });
 
 /** Full physics config for a catalogue car: archetype + the car's own figures; springs and dampers follow the mass. */
 export function carConfig(def: CarDef): VehicleArchetypeConfig {
   const a = ARCHETYPES[def.archetype], s = def.spec, m = (s.massKg ?? a.massKg) / a.massKg;
   const cfg: VehicleArchetypeConfig = { ...a, name: def.name, tagline: def.blurb, suspensionStiffness: a.suspensionStiffness * m, suspensionDamping: a.suspensionDamping * m, ...s };
-  if (def.gen) {
+  {
     const w = wheelSpots(def.gen), z = carSize(def.gen);
     cfg.wheelBaseM = w[0][2] - w[2][2]; cfg.trackWidthM = w[0][0] * 2;
     cfg.dragCoefficient = s.dragCoefficient ?? Math.max(0.3, (0.36 * z.W * z.H) / 2.2);   // physics uses a fixed 2.2 m2 frontal area
@@ -47,7 +38,6 @@ export function carConfig(def: CarDef): VehicleArchetypeConfig {
 }
 
 export const CAR_CATALOG: CarDef[] = [
-  c('ferrari', 'Ferrari 458 Italia', 'Sports', 'RWD_DRIFT', 'Mid-engine V8 icon. Paintable.', sp(1485, 419, 'RWD', 1.24, 2.65, 1.67, rev(7900, 9000, 4.1, 0.33, { downforceCoefficient: 1.6 })), { file: 'assets/models/cars/ferrari-lod.glb', flip: true, paintable: true, wheels: ['wheel_fl', 'wheel_fr', 'wheel_rl', 'wheel_rr'] }),
   // ---- generated local bodies (paintable, true size)
   g('gusheshe', 'Gusheshe 325', 'coupe', 'RWD_DRIFT', 'Boxy rear-drive legend of every spin event. Paintable.', 1180, 155, 'RWD', 1.02, rev(6200, 7000, 4.1, 0.36)),
   g('sa-hatch', 'Vivo GT Hatch', 'hatch', 'AWD_GRIP', 'The hatch on every street, warmed up. Paintable.', 1080, 110, 'FWD', 1.08, ROAD),
@@ -88,6 +78,6 @@ export const CAR_CATALOG: CarDef[] = [
   g('kart-oopi', 'Kart Pi', 'kart', 'RWD_DRIFT', 'Pure drift fun, helmeted driver included. Paintable.', 230, 21, 'RWD', 1.3, KART, { cls: 'Kart' }),
   g('kart-oozi', 'Kart Zi', 'kart', 'RWD_DRIFT', 'Pure drift fun, helmeted driver included. Paintable.', 230, 21, 'RWD', 1.3, KART, { cls: 'Kart' }),
 ];
+/** The car you start in. */
+export const DEFAULT_CAR: CarDef = CAR_CATALOG.find((d) => d.id === 'race') ?? CAR_CATALOG[0];
 export const CAR_CLASSES: CarClass[] = ['Local', 'Sports', 'Race', 'Everyday', 'SUV', 'Van & Truck', 'Service', 'Farm', 'Kart'];
-/** Models used for ambient traffic on the real OSM roads. */
-export const TRAFFIC_MODELS = ['taxi', 'van', 'sedan', 'hatchback-sports', 'suv', 'delivery', 'truck', 'sedan-sports', 'suv-luxury', 'van', 'taxi', 'ambulance', 'police'];

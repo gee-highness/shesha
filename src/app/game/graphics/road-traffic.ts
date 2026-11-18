@@ -3,7 +3,6 @@ import { makeCar, PAINTS, CarKind } from './car-gen';
 import * as THREE from 'three';
 import { AssetLibrary } from './asset-library';
 import type { WorldBuilder } from './world-builder';
-import { CAR_CATALOG, TRAFFIC_MODELS } from '../cars';
 import type { DynamicCollider } from '../physics/collision';
 import type { TrafficSignals } from './traffic-signals';
 import type { RoadGraph } from '../road-graph';

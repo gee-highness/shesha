@@ -36,7 +36,7 @@ export class MultiplayerService {
   /** Called when someone joins / leaves (for the HUD toast). */
   onEvent?: (msg: string) => void;
   /** Supplied by the app: current car id and paint colour. */
-  getLoadout: () => { car: string; color: string } = () => ({ car: 'ferrari', color: '#ef4444' });
+  getLoadout: () => { car: string; color: string } = () => ({ car: 'race', color: '#ef4444' });
 
   private ep: Endpoint | null = null; private link: Link | null = null; private hub: RoomHub | null = null; private gen = 0;
   private lastSend = 0; private pingAt = 0;

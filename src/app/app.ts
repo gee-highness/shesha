@@ -35,7 +35,7 @@ import { RaycastVehicle } from './game/physics/raycast-vehicle';
 
 // Components
 import { CarSelectComponent } from './components/car-select/car-select.component';
-import { CAR_CATALOG, CarDef, carConfig } from './game/cars';
+import { CAR_CATALOG, DEFAULT_CAR, CarDef, carConfig } from './game/cars';
 import { ControllerSetupComponent } from './components/controller-setup/controller-setup.component';
 import { MultiplayerComponent } from './components/multiplayer/multiplayer.component';
 import { MultiplayerService, FLAG } from './services/multiplayer.service';
@@ -103,7 +103,7 @@ export class App implements AfterViewInit, OnDestroy {
   readonly started = signal<boolean>(false);
   readonly showCars = signal<boolean>(false);
   readonly showPadSetup = signal<boolean>(false);
-  readonly currentCar = signal<CarDef>(CAR_CATALOG[0]);
+  readonly currentCar = signal<CarDef>(DEFAULT_CAR);
 
   public onChooseCar(def: CarDef): void {
     this.currentCar.set(def);

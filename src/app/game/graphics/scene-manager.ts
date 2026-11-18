@@ -33,7 +33,7 @@ function applyStyleGrade(): void {
 }
 import { AssetLibrary } from './asset-library';
 import { RoadTraffic } from './road-traffic';
-import { CAR_CATALOG, CarDef } from '../cars';
+import { CAR_CATALOG, DEFAULT_CAR, CarDef } from '../cars';
 import { RemotePlayers } from './remote-players';
 import { NavMarkers } from './nav-markers';
 import type { Route } from '../road-graph';
@@ -187,7 +187,7 @@ export class SceneManager {
     this.makeHills();
   }
 
-  public spawnVehicle(config: VehicleArchetypeConfig, visuals: VisualCustomization, def: CarDef = CAR_CATALOG[0]): void {
+  public spawnVehicle(config: VehicleArchetypeConfig, visuals: VisualCustomization, def: CarDef = DEFAULT_CAR): void {
     if (this.vehicleMeshGroup) {
       this.scene.remove(this.vehicleMeshGroup);
     }
@@ -396,7 +396,7 @@ export class SceneManager {
       this.modelHolder.position.y = (gy + this.modelRadius - vehicle.position.y) - this.modelWheelCy;
     }
 
-    // 2b. Real Ferrari wheels: steer (front) + roll
+    // 2b. Model wheels: steer (front) + roll
     if (this.modelWheels.length === 4) {
       const fwd = vehicle.velocity.dot(this.fwdS.set(0, 0, 1).applyQuaternion(vehicle.quaternion));
       this.modelSpin += this.modelSpinSign * (fwd / this.modelRadius) * dt;
