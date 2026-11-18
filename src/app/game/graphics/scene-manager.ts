@@ -33,7 +33,8 @@ function applyStyleGrade(): void {
 }
 import { AssetLibrary } from './asset-library';
 import { RoadTraffic } from './road-traffic';
-import { CAR_CATALOG, DEFAULT_CAR, CarDef } from '../cars';
+import { CAR_CATALOG, CarDef } from '../cars';
+import type { CarPaint } from '../../services/paint.service';
 import { RemotePlayers } from './remote-players';
 import { NavMarkers } from './nav-markers';
 import type { Route } from '../road-graph';
@@ -186,7 +187,7 @@ export class SceneManager {
     this.makeHills();
   }
 
-  public spawnVehicle(config: VehicleArchetypeConfig, visuals: VisualCustomization, def: CarDef = DEFAULT_CAR): void {
+  public spawnVehicle(config: VehicleArchetypeConfig, visuals: VisualCustomization, def: CarDef, paint: CarPaint): void {
     if (this.vehicleMeshGroup) {
       this.scene.remove(this.vehicleMeshGroup);
     }
@@ -198,7 +199,7 @@ export class SceneManager {
     this.modelTail = null;
     this.modelHolder = null;
     const parts = this.vehicleParts;
-    AssetLibrary.attachPlayerCar(this.vehicleMeshGroup, def, config.wheelBaseM, visuals.bodyColor).then((r) => {
+    AssetLibrary.attachPlayerCar(this.vehicleMeshGroup, def, config.wheelBaseM, paint).then((r) => {
       if (r && parts === this.vehicleParts) { this.modelWheels = r.wheels; this.modelTail = r.tail; this.modelSpinSign = r.spinSign; this.modelRadius = r.radius; this.modelHolder = r.holder; this.modelWheelCy = r.wheelCentreY; }
     });
   }

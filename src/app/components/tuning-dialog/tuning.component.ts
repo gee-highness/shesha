@@ -1,3 +1,4 @@
+import { PaintService } from '../../services/paint.service';
 import { ChangeDetectionStrategy, Component, inject, output, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { MatIconModule } from '@angular/material/icon';
@@ -282,15 +283,15 @@ import { ARCHETYPES, TuningService } from '../../services/tuning.service';
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-6 mt-6">
             <!-- Body Paint Finish & Color -->
             <div class="bg-zinc-900/60 p-4 rounded-2xl border border-zinc-800">
-              <span class="text-xs font-bold text-zinc-300 block mb-2">Body Color & Finish</span>
+              <span class="text-xs font-bold text-zinc-300 block mb-2">Body Color & Finish <span class="font-normal text-zinc-500">· this car · full paint shop in the Garage</span></span>
               <div class="flex items-center gap-3 mb-4">
                 @for (finish of paintFinishes; track finish) {
                   <button
                     (click)="setPaintFinish(finish)"
                     class="px-2.5 py-1 text-[11px] font-bold rounded-lg uppercase cursor-pointer transition-colors"
-                    [class.bg-white]="tuningService.visuals().paintFinish === finish"
-                    [class.text-zinc-950]="tuningService.visuals().paintFinish === finish"
-                    [class.text-zinc-400]="tuningService.visuals().paintFinish !== finish"
+                    [class.bg-white]="paint.currentPaint().finish === finish"
+                    [class.text-zinc-950]="paint.currentPaint().finish === finish"
+                    [class.text-zinc-400]="paint.currentPaint().finish !== finish"
                   >
                     {{ finish }}
                   </button>
@@ -298,15 +299,15 @@ import { ARCHETYPES, TuningService } from '../../services/tuning.service';
               </div>
 
               <!-- Color Swatches -->
-              <div class="flex items-center gap-3">
-                @for (color of ['#ef4444', '#0284c7', '#18181b', '#eab308', '#16a34a', '#8b5cf6', '#f97316']; track color) {
+              <div class="flex flex-wrap items-center gap-2.5">
+                @for (color of ['#d7263d', '#ff6b1a', '#f2a900', '#0f8b5f', '#00a6c8', '#1b4fd8', '#7b2cbf', '#f5f5f2', '#9aa3ad', '#16181d']; track color) {
                   <button
-                    (click)="tuningService.updateVisuals({ bodyColor: color })"
+                    (click)="paint.setCurrent({ body: color })"
                     class="w-8 h-8 rounded-full border-2 transition-transform hover:scale-110 cursor-pointer flex items-center justify-center"
                     [style.background-color]="color"
                     [attr.aria-label]="'Body color ' + color"
-                    [class.border-white]="tuningService.visuals().bodyColor === color"
-                    [class.border-transparent]="tuningService.visuals().bodyColor !== color"
+                    [class.border-white]="paint.currentPaint().body === color"
+                    [class.border-transparent]="paint.currentPaint().body !== color"
                   >
                     <span class="sr-only">{{ color }}</span>
                   </button>
@@ -352,6 +353,7 @@ import { ARCHETYPES, TuningService } from '../../services/tuning.service';
 })
 export class TuningComponent {
   public tuningService = inject(TuningService);
+  public paint = inject(PaintService);
   closeModal = output<void>();
 
   readonly archetypesList = Object.values(ARCHETYPES);
@@ -360,7 +362,7 @@ export class TuningComponent {
   public Math = Math;
 
   public setPaintFinish(finish: 'metallic' | 'gloss' | 'matte' | 'pearlescent'): void {
-    this.tuningService.updateVisuals({ paintFinish: finish });
+    this.tuningService.updateVisuals({ paintFinish: finish }); this.paint.setCurrent({ finish });
   }
 
   public onSliderChange(field: string, event: Event): void {

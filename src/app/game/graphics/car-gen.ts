@@ -490,11 +490,30 @@ function kart(s: Spec, col: number[], d: Dress): void {
   d.box(0.06, 0.03, 0.03, 0, 0.12, -0.9, TAIL, { lamp: true });
 }
 
+// ---------------------------------------------------------------- paint options (player paint shop)
+export type LiveryChoice = 'factory' | 'none' | 'racing' | 'twin' | 'side' | 'stripe';
+export interface PaintOpts { accent?: number[]; livery?: LiveryChoice; rim?: number[] }
+const optKey = (o?: PaintOpts): string => (o ? `${o.accent?.join(',') ?? ''}/${o.livery ?? ''}/${o.rim?.join(',') ?? ''}` : '');
+/** Factory accent (stripe / roof / livery colour) and wheel colour for a kind, as linear RGB. */
+export function factoryAccent(kind: CarKind): number[] { const s = SPECS[kind]; return s.liv?.c1 ?? s.roof ?? WHITE; }
+export function factoryRim(kind: CarKind): number[] { return rimColour(SPECS[kind].rim); }
+const rimColour = (style: Rim): number[] => style === 'race' ? [0.95, 0.72, 0.12] : style === 'turbine' ? GUN : style === 'mesh' ? [0.78, 0.8, 0.82] : style === 'steel' ? [0.25, 0.26, 0.28] : style === 'tractor' ? [0.95, 0.72, 0.05] : style === 'truck' ? [0.82, 0.83, 0.85] : style === 'kart' ? WHITE : [0.72, 0.74, 0.77];
+
 // ---------------------------------------------------------------- assembly
 const cache = new Map<string, THREE.BufferGeometry>();
-function build(kind: CarKind, col: number[], stripe: number[] | undefined, lite: boolean): THREE.BufferGeometry {
-  const s = SPECS[kind], d = new Dress(lite);
-  const liv: Liv | undefined = s.liv ? { ...s.liv, c1: stripe ?? s.liv.c1 } : stripe ? { t: 'stripe', c1: stripe } : undefined;
+const custom = new Map<string, THREE.BufferGeometry>();
+function lru(m: Map<string, THREE.BufferGeometry>, key: string, make: () => THREE.BufferGeometry, max = 16): THREE.BufferGeometry {
+  let g = m.get(key); if (g) { m.delete(key); m.set(key, g); return g; }
+  g = make(); m.set(key, g);
+  while (m.size > max) { const [k, old] = m.entries().next().value as [string, THREE.BufferGeometry]; m.delete(k); old.dispose(); }   // a disposed geometry still on screen is simply re-uploaded
+  return g;
+}
+function build(kind: CarKind, col: number[], stripe: number[] | undefined, lite: boolean, o?: PaintOpts): THREE.BufferGeometry {
+  const base = SPECS[kind], acc = o?.accent ?? stripe;
+  const s: Spec = base.roof && o?.accent ? { ...base, roof: o.accent } : base, d = new Dress(lite);
+  let liv: Liv | undefined = s.liv ? { ...s.liv, c1: acc ?? s.liv.c1 } : stripe ? { t: 'stripe', c1: stripe } : undefined;
+  if (o?.livery === 'none') liv = undefined;
+  else if (o?.livery && o.livery !== 'factory') liv = { t: o.livery, c1: acc ?? factoryAccent(kind) };
   if (s.special === 'kart') kart(s, col, d); else if (s.special) tractor(s, col, d, s.special === 'loader');
   else { loft(s, col, d, liv); dress(s, col, d, kind, liv); }
   const groups = d.b.map((list) => (list.length ? mergeGeometries(list) : null));
@@ -505,15 +524,24 @@ function build(kind: CarKind, col: number[], stripe: number[] | undefined, lite:
   for (const p of parts) p.dispose(); out.computeBoundingSphere(); return out;
 }
 /** Body shell (no wheels) in the given paint; `stripe` overrides the livery colour (taxis, coaches, race field). Cached per kind + colour. */
-export function carBody(kind: CarKind, col: number[], stripe?: number[]): THREE.BufferGeometry {
-  const key = `${kind}|${col.join(',')}|${stripe ? stripe.join(',') : ''}`; let g = cache.get(key); if (!g) { g = build(kind, col, stripe, false); cache.set(key, g); } return g;
+export function carBody(kind: CarKind, col: number[], stripe?: number[], o?: PaintOpts): THREE.BufferGeometry {
+  const key = `${kind}|${col.join(',')}|${stripe ? stripe.join(',') : ''}|${optKey(o)}`;
+  if (o) return lru(custom, key, () => build(kind, col, stripe, false, o));   // paint-shop jobs: small evicting cache (a colour picker drag makes dozens)
+  let g = cache.get(key); if (!g) { g = build(kind, col, stripe, false, o); cache.set(key, g); } return g;
 }
 
 // ---------------------------------------------------------------- wheels
 const wheelCache = new Map<string, THREE.BufferGeometry>();
 /** One wheel (lathed tyre with rounded sidewalls + styled rim, brake disc) with the axle along x, centred on the origin. */
-export function wheelGeo(r: number, style: Rim = 'five', w = r * 0.62, lite = false): THREE.BufferGeometry {
-  const key = `${r}|${style}|${w}|${lite}`; let g = wheelCache.get(key); if (g) return g;
+export function wheelGeo(r: number, style: Rim = 'five', w = r * 0.62, lite = false, rimCol?: number[]): THREE.BufferGeometry {
+  const key = `${r}|${style}|${w}|${lite}|${rimCol?.join(',') ?? ''}`;
+  if (rimCol) return lru(customWheels, key, () => buildWheel(r, style, w, lite, rimCol), 24);
+  let g = wheelCache.get(key); if (g) return g;
+  g = buildWheel(r, style, w, lite); wheelCache.set(key, g); return g;
+}
+const customWheels = new Map<string, THREE.BufferGeometry>();
+function buildWheel(r: number, style: Rim, w: number, lite: boolean, rimCol?: number[]): THREE.BufferGeometry {
+  let g: THREE.BufferGeometry;
   const seg = lite ? 10 : 22, rimR = style === 'tractor' ? r * 0.55 : style === 'kart' ? r * 0.6 : style === 'truck' ? r * 0.58 : style === 'steel' ? r * 0.62 : r * 0.7;
   const d = new Dress(lite);
   // tyre: lathe profile (bead -> sidewall bulge -> tread shoulder) mirrored across the centre line
@@ -522,7 +550,7 @@ export function wheelGeo(r: number, style: Rim = 'five', w = r * 0.62, lite = fa
   for (const [x, y] of lite ? [pts[0], pts[3], pts[4], pts[7]] : pts) prof.push(new THREE.Vector2(x, y));
   const tyre = new THREE.LatheGeometry(prof, seg); tyre.rotateZ(Math.PI / 2); d.put(tyre, TYRE);
   if (style === 'tractor' && !lite) for (let k = 0; k < 18; k++) for (const sd of [-1, 1]) { const a = (k / 18) * Math.PI * 2 + (sd > 0 ? 0.17 : 0); const lug = new THREE.BoxGeometry(hw * 0.95, 0.07, 0.11); lug.rotateX(-sd * 0.5); lug.translate(sd * hw * 0.47, r + 0.02, 0); lug.rotateX(a); d.put(lug, TYRE); }
-  const rimC = style === 'race' ? [0.95, 0.72, 0.12] : style === 'turbine' ? GUN : style === 'mesh' ? [0.78, 0.8, 0.82] : style === 'steel' ? [0.25, 0.26, 0.28] : style === 'tractor' ? [0.95, 0.72, 0.05] : style === 'truck' ? [0.82, 0.83, 0.85] : style === 'kart' ? WHITE : [0.72, 0.74, 0.77];
+  const rimC = rimCol ?? rimColour(style);
   for (const sd of lite ? [1] : [-1, 1]) {   // far LOD: outer face only (carStatic turns left-side wheels around)
     const face = sd * (hw - 0.025);
     const barrel = new THREE.CircleGeometry(rimR * 0.98, seg); barrel.rotateY((sd * Math.PI) / 2); barrel.translate(face - sd * 0.05, 0, 0); d.put(barrel, GUN);
@@ -543,7 +571,7 @@ export function wheelGeo(r: number, style: Rim = 'five', w = r * 0.62, lite = fa
     else if (style === 'kart') spokes(5, rimR * 0.3, rimR * 0.8, rimC);
     if (style !== 'steel' && style !== 'tractor' && style !== 'truck') { const hub = new THREE.CircleGeometry(rimR * 0.2, 12); hub.rotateY((sd * Math.PI) / 2); hub.translate(face + sd * 0.004, 0, 0); d.put(hub, style === 'race' ? RED : GUN); }
   }
-  g = mergeGeometries(d.b[0])!; for (const p of d.b[0]) p.dispose(); g.computeBoundingSphere(); wheelCache.set(key, g); return g;
+  g = mergeGeometries(d.b[0])!; for (const p of d.b[0]) p.dispose(); g.computeBoundingSphere(); return g;
 }
 /** Wheel centres (FL, FR, RL, RR) for a kind: [x, y, z]; extra axles (coaches, lorries) follow. */
 export function wheelSpots(kind: CarKind): [number, number, number][] {
@@ -553,15 +581,26 @@ export function wheelSpots(kind: CarKind): [number, number, number][] {
   return o;
 }
 export const carSize = (kind: CarKind): { L: number; W: number; H: number; wr: number } => SPECS[kind];
-const wheelOf = (kind: CarKind, i: number, lite: boolean): THREE.BufferGeometry => {
+const wheelOf = (kind: CarKind, i: number, lite: boolean, rim?: number[]): THREE.BufferGeometry => {
   const s = SPECS[kind], rear = i >= 2, r = rear ? (s.wrR ?? s.wr) : s.wr, w = tyreW(s, r) * (rear && s.dual ? 1.7 : 1);
-  return wheelGeo(r, s.rim, w, lite);
+  return wheelGeo(r, s.rim, w, lite, rim);
 };
 
 /** Glossy two-layer look without a physical material: metallic base, sky reflections from the scene environment. */
 export const carPaintMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.24, metalness: 0.5, envMapIntensity: 1.35 });
 /** Player's own car: same vertex-coloured shell under a clear coat. */
 export const playerPaintMat = new THREE.MeshPhysicalMaterial({ vertexColors: true, roughness: 0.3, metalness: 0.5, clearcoat: 1, clearcoatRoughness: 0.04, envMapIntensity: 1.3 });
+export type PaintFinish = 'metallic' | 'gloss' | 'matte' | 'pearlescent';
+const finishMats = new Map<PaintFinish, THREE.MeshPhysicalMaterial>();
+/** Player paint in a chosen finish: metallic flake, solid gloss, satin matte, or a pearl that shifts colour with the angle. */
+export function playerPaint(f: PaintFinish): THREE.MeshPhysicalMaterial {
+  let m = finishMats.get(f); if (m) return m;
+  m = f === 'metallic' ? playerPaintMat
+    : f === 'gloss' ? new THREE.MeshPhysicalMaterial({ vertexColors: true, roughness: 0.22, metalness: 0.08, clearcoat: 1, clearcoatRoughness: 0.03, envMapIntensity: 1.2 })
+    : f === 'matte' ? new THREE.MeshPhysicalMaterial({ vertexColors: true, roughness: 0.78, metalness: 0.05, clearcoat: 0, envMapIntensity: 0.6 })
+    : new THREE.MeshPhysicalMaterial({ vertexColors: true, roughness: 0.26, metalness: 0.35, clearcoat: 1, clearcoatRoughness: 0.05, iridescence: 0.7, iridescenceIOR: 1.6, iridescenceThicknessRange: [180, 520], envMapIntensity: 1.35 });
+  finishMats.set(f, m); return m;
+}
 /** Lamps: unlit, so LED signatures read at any time of day (values above 1 bloom). */
 export const lampMat = new THREE.MeshBasicMaterial({ vertexColors: true });
 const wheelMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.45, metalness: 0.5, envMapIntensity: 1.1 });
@@ -575,11 +614,11 @@ export function carStatic(kind: CarKind, col: number[], stripe?: number[]): THRE
 }
 
 /** Drivable / traffic vehicle: body mesh (paint + lamps) + spinning wheels. userData: car (detail group), wheels (rotate .x to spin). */
-export function makeCar(kind: CarKind, col: number[], stripe?: number[], mat: THREE.Material = carPaintMat): THREE.Group {
+export function makeCar(kind: CarKind, col: number[], stripe?: number[], mat: THREE.Material = carPaintMat, o?: PaintOpts): THREE.Group {
   const g = new THREE.Group(), detail = new THREE.Group(); const s = SPECS[kind];
-  const body = new THREE.Mesh(carBody(kind, col, stripe), [mat, lampMat]); body.castShadow = true; detail.add(body);
+  const body = new THREE.Mesh(carBody(kind, col, stripe, o), [mat, lampMat]); body.castShadow = true; detail.add(body);
   const wheels: THREE.Object3D[] = [];
-  wheelSpots(kind).forEach(([x, y, z], i) => { const w = new THREE.Mesh(wheelOf(kind, Math.min(i, 3), false), wheelMat); w.position.set(x, y, z); w.castShadow = false; detail.add(w); wheels.push(w); });
+  wheelSpots(kind).forEach(([x, y, z], i) => { const w = new THREE.Mesh(wheelOf(kind, Math.min(i, 3), false, o?.rim), wheelMat); w.position.set(x, y, z); w.castShadow = false; detail.add(w); wheels.push(w); });
   g.add(detail); g.userData['car'] = detail; g.userData['wheels'] = wheels; g.userData['paint'] = col; g.userData['size'] = s;
   return g;
 }
