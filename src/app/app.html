@@ -16,6 +16,9 @@
     ></app-hud>
   }
 
+  <!-- Crash flash: red edge vignette that fades with the impact -->
+  <div class="absolute inset-0 pointer-events-none z-10" [style.opacity]="drive.impact()" style="background: radial-gradient(ellipse at center, transparent 45%, rgba(220,38,38,.55) 100%)"></div>
+
   <app-multiplayer></app-multiplayer>
   @if (showPadSetup()) { <app-controller-setup (closeModal)="showPadSetup.set(false); gamepadService.cancelLearn()"></app-controller-setup> }
 

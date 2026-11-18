@@ -331,6 +331,7 @@ export class App implements AfterViewInit, OnDestroy {
       this.drive.tick(frameDelta, this.vehicle.steerInput);
       this.audioService.setHorn(this.drive.horn());
       this.sceneManager.setLights(this.drive.headlights(), this.drive.leftOn, this.drive.rightOn, this.vehicle.brake > 0.15 || this.vehicle.handbrake, false, this.nightFactor);
+      this.drive.impact.update((v) => (v > 0.01 ? v * Math.exp(-3.2 * frameDelta) : 0));
       this.sceneManager.cameraRig.update(
         frameDelta,
         this.vehicle.position,
@@ -338,6 +339,7 @@ export class App implements AfterViewInit, OnDestroy {
         telem.speedKmh,
         pad.lookBack
       );
+      this.sceneManager.cameraRig.applyShake(frameDelta);
       tp = this.mark('camera', tp);
       this.sceneManager.syncVehicleVisuals(this.vehicle, frameDelta);
       if (this.mp.status() === 'online') {
@@ -473,6 +475,7 @@ export class App implements AfterViewInit, OnDestroy {
     this.vehicle.tuning = this.tuningService.tuning();
 
     // Query Ground Height & Normals from WorldBuilder
+    const pp = this.vehicle.position, prev = { x: pp.x, y: pp.y, z: pp.z };
     this.vehicle.updatePhysics(dt, (x, z, y) => {
       return this.sceneManager.worldBuilder.queryGround(x, z, y);
     }, (x, z) => this.sceneManager.worldBuilder.calculateRawTerrainHeight(x, z));
@@ -480,16 +483,26 @@ export class App implements AfterViewInit, OnDestroy {
     // Solid world: buildings, trees, poles and other cars
     const wb = this.sceneManager.worldBuilder;
     if (wb.ready) {
-      const hit = wb.collision.resolve(this.vehicle, this.sceneManager.trafficColliders(), dt);
+      const hit = wb.collision.resolve(this.vehicle, this.sceneManager.trafficColliders(), dt, prev);
       if (hit.impactSpeed > 1.2) {
         if (hit.hitKind === 'car') this.sceneManager.hitTraffic(hit.hitId, hit.impactSpeed);
         this.crashRumble(hit.impactSpeed); this.crashNoise = Math.max(this.crashNoise, Math.min(1, hit.impactSpeed / 8));
+        const f = Math.min(1, hit.impactSpeed / 16), now = performance.now();
+        if (now - this.lastCrashFx > 220 || f > this.lastCrashF + 0.25) {
+          this.lastCrashFx = now; this.lastCrashF = f;
+          this.audioService.playCollision(0.25 + f * 0.75);
+          this.sceneManager.cameraRig.shake = Math.max(this.sceneManager.cameraRig.shake, 0.04 + f * 0.32);
+          this.drive.impact.set(Math.max(this.drive.impact(), 0.12 + f * 0.7));
+        }
       }
+      // wedged against something for 3 s: tell the player how to get out
+      if (hit.impactSpeed > 0.05 && Math.hypot(this.vehicle.velocity.x, this.vehicle.velocity.z) < 1.5) { this.stuckT += dt; if (this.stuckT > 3) { this.stuckT = -12; this.raceSvc.flash('Stuck? Press R (or the reset button) to put the car back on its wheels.', 4500); } }
+      else if (this.stuckT > 0) this.stuckT = Math.max(0, this.stuckT - dt * 2);
     }
   }
 
   private steerSm = 0; private thrSm = 0; private brkSm = 0;
-  private lastCrashRumble = 0;
+  private lastCrashRumble = 0; private lastCrashFx = 0; private lastCrashF = 0; private stuckT = 0;
   private slowTick = 0;
   private fpsT = 0;
   private seenViews = new Set<string>();
@@ -639,8 +652,11 @@ export class App implements AfterViewInit, OnDestroy {
 
   public resetCarUpright(): void {
     if (!this.vehicle) return;
-    const y = this.sceneManager.worldBuilder.calculateRawTerrainHeight(this.vehicle.position.x, this.vehicle.position.z);
-    this.vehicle.position.y = y + 0.6;
+    const wb = this.sceneManager.worldBuilder, p = this.vehicle.position;
+    const free = wb.collision.freeSpot(p.x, p.z, p.y);   // never respawn inside a wall, tree or other car
+    p.x = free.x; p.z = free.z;
+    p.y = wb.groundHeightAt(p.x, p.z, p.y + 1) + 0.6;
+    this.stuckT = 0;
     this.vehicle.velocity.set(0, 0, 0);
     this.vehicle.angularVelocity.set(0, 0, 0);
     const yaw = new THREE.Euler().setFromQuaternion(this.vehicle.quaternion).y;

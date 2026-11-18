@@ -9,6 +9,8 @@ export class DriveStateService {
   readonly hazards = signal<boolean>(false);
   readonly headlights = signal<0 | 1 | 2>(0); // off / low beam / high beam
   readonly horn = signal<boolean>(false);
+  /** 0..1 crash flash strength (decays each frame): drives the screen vignette. */
+  readonly impact = signal(0);
   /** Blink phase (true = lamps lit). Flips ~1.5 Hz while an indicator or the hazards are active. */
   readonly blink = signal<boolean>(false);
   /** Set when the player manually touched the headlights, which disables the automatic night-time switch-on. */
