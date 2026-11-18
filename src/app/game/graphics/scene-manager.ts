@@ -56,7 +56,6 @@ export class SceneManager {
   public vehicleMeshGroup!: THREE.Group;
   private modelWheels: THREE.Object3D[] = [];
   private modelTail: THREE.MeshStandardMaterial | null = null;
-  private modelSpin = 0;
   private modelSpinSign = 1;
   private modelHolder: THREE.Group | null = null;
   private modelWheelCy = 0.33;
@@ -311,6 +310,7 @@ export class SceneManager {
     }
   }
 
+  private modelSpins = [0, 0, 0, 0];
   public syncVehicleVisuals(vehicle: RaycastVehicle, dt: number): void {
     if (!this.vehicleMeshGroup || !this.vehicleParts) return;
 
@@ -398,10 +398,9 @@ export class SceneManager {
 
     // 2b. Model wheels: steer (front) + roll
     if (this.modelWheels.length === 4) {
-      const fwd = vehicle.velocity.dot(this.fwdS.set(0, 0, 1).applyQuaternion(vehicle.quaternion));
-      this.modelSpin += this.modelSpinSign * (fwd / this.modelRadius) * dt;
       this.modelWheels.forEach((w, i) => {
-        w.rotation.x = this.modelSpin;
+        this.modelSpins[i] += this.modelSpinSign * ((vehicle.wheels[i].angularVelocityRadS * 0.33) / this.modelRadius) * dt;   // each wheel's own spin: burnouts and lock-ups show
+        w.rotation.x = this.modelSpins[i];
         w.rotation.y = i < 2 ? -vehicle.steerInput * THREE.MathUtils.degToRad(30) : 0;
       });
     }

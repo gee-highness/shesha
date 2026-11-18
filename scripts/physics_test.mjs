@@ -96,3 +96,16 @@ for (const [label, ang] of [['roof', Math.PI], ['side', Math.PI / 2]]) {
   const up = new THREE.Vector3(0, 1, 0).applyQuaternion(v.quaternion).y;
   console.log('%s: up.y=%s  %s', label, up.toFixed(2), up > 0.9 ? 'OK (back on its wheels)' : 'STILL OVER');
 }
+
+// ---------------- wheel spin: launch slip, handbrake lock, free wheels in the air
+console.log('\n== wheel spin');
+for (const id of ['RWD_DRIFT', 'AWD_GRIP']) {
+  const v = mk(id); settle(v, 1); v.throttle = 1; let peak = 0;
+  for (let i = 0; i < 2 / DT; i++) { v.updatePhysics(DT, ground); for (const w of v.wheels) if (w.isDriven) peak = Math.max(peak, w.slipRatioPct); }
+  console.log('%s launch: peak driven-wheel slip %s%%, speed after 2 s %s km/h', id, peak, kmh(v).toFixed(0));
+}
+{ const v = mk('RWD_DRIFT'); settle(v, 1); v.velocity.set(0, 0, 16.7); for (const w of v.wheels) w.angularVelocityRadS = 16.7 / 0.33; v.handbrake = true; v.steerInput = 0.6;
+  let yaw = 0; for (let i = 0; i < 1 / DT; i++) { v.updatePhysics(DT, ground); yaw = Math.max(yaw, Math.abs(v.angularVelocity.y)); }
+  console.log('handbrake @60: rear wheel speed %s rad/s (locked = 0), peak yaw rate %s rad/s', v.wheels[2].angularVelocityRadS.toFixed(1), yaw.toFixed(2)); }
+{ const v = mk('AWD_GRIP'); v.position.y = 3; v.throttle = 1; for (let i = 0; i < 0.3 / DT; i++) v.updatePhysics(DT, ground);
+  console.log('throttle in the air: driven wheels spin to %s rad/s, rpm %s', v.wheels[0].angularVelocityRadS.toFixed(0), v.currentRpm.toFixed(0)); }
