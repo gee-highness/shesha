@@ -87,3 +87,12 @@ for (const [label, hf] of [['steep sine hills (6 m amplitude, 40 m period)', (x,
     console.log('%s / %s: min clearance of body points %s m  %s  ended z=%s', label, id, minClear.toFixed(3), minClear >= -0.001 ? 'OK (never below ground)' : 'PENETRATED', v.position.z.toFixed(0));
   }
 }
+
+// ---------------- self-righting: a car left on its roof or side must get back onto its wheels
+console.log('\n== self-righting');
+for (const [label, ang] of [['roof', Math.PI], ['side', Math.PI / 2]]) {
+  const v = mk('AWD_GRIP'); v.position.set(0, 1.2, 0); v.quaternion.setFromAxisAngle(new THREE.Vector3(0, 0, 1), ang);
+  for (let i = 0; i < 6 / DT; i++) v.updatePhysics(DT, ground);
+  const up = new THREE.Vector3(0, 1, 0).applyQuaternion(v.quaternion).y;
+  console.log('%s: up.y=%s  %s', label, up.toFixed(2), up > 0.9 ? 'OK (back on its wheels)' : 'STILL OVER');
+}

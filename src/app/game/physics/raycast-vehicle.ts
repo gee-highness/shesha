@@ -19,7 +19,8 @@ export class RaycastVehicle {
   public reverse = false;
   /** Driving assists (Forza-style defaults): counter-steer help when the rear steps out. 0 = off .. 1 = strong. */
   public stabilityAssist = 0.6;
-  private shiftTimer = 0;          // torque is cut while a gear change completes
+  private shiftTimer = 0;
+  private flipT = 0;          // torque is cut while a gear change completes
   private _latF = [0, 0, 0, 0];    // tyre lateral force with relaxation (tyres do not react instantly)
   public currentRpm = 900;
   public engineLoad = 0;
@@ -120,6 +121,12 @@ export class RaycastVehicle {
    * Fixed-step physics update.
    */
   public updatePhysics(dt: number, groundQuery: (x: number, z: number, y?: number) => { height: number; normal: THREE.Vector3; surfaceClass: number; surfaceName?: string }, terrainHeight?: (x: number, z: number) => number): void {
+    // 120 Hz inner sub-steps: stiff springs, tyre forces and ground contacts integrate far more accurately than at the 60 Hz frame step
+    const n = dt > 1 / 100 ? 2 : 1;
+    for (let i = 0; i < n; i++) this.step(dt / n, groundQuery, terrainHeight);
+  }
+
+  private step(dt: number, groundQuery: (x: number, z: number, y?: number) => { height: number; normal: THREE.Vector3; surfaceClass: number; surfaceName?: string }, terrainHeight?: (x: number, z: number) => number): void {
     this._forward.set(0, 0, 1).applyQuaternion(this.quaternion);
     this._up.set(0, 1, 0).applyQuaternion(this.quaternion);
     this._right.set(1, 0, 0).applyQuaternion(this.quaternion);
@@ -147,7 +154,7 @@ export class RaycastVehicle {
       const restLength = this.config.suspensionRestLengthM;
       const rayDist = wheelPos.y - ground.height;
 
-      const isContact = rayDist <= restLength && rayDist > -0.5;
+      const isContact = rayDist <= restLength && rayDist > -0.5 && this._up.y > 0.15;   // a car on its side or roof has no wheels on the ground
       w.surfaceClass = ground.surfaceClass;
       if (ground.surfaceName) w.surfaceName = ground.surfaceName;
 
@@ -229,8 +236,8 @@ export class RaycastVehicle {
       this.activeAeroAngleDeg = Math.max(10, this.activeAeroAngleDeg - dt * 40); // Cruising mode
     }
 
-    const aeroDragN = dynPressure * this.config.dragCoefficient * 2.2;
-    netForce.addScaledVector(this._forward, -Math.sign(speedMs) * aeroDragN);
+    { const vMag = this.velocity.length(); if (vMag > 0.1) { const side = Math.abs(this.velocity.dot(this._right)) / vMag;   // sideways the car shows ~2x the frontal area
+      const drag = 0.5 * 1.225 * vMag * vMag * this.config.dragCoefficient * 2.2 * (1 + side * 1.4); netForce.addScaledVector(this.velocity, -drag / vMag); } }
 
     // 4. Engine & Transmission updates
     this.updatePowertrain(dt, speedMs);
@@ -251,7 +258,7 @@ export class RaycastVehicle {
       (tb.z - (Iy - Ix) * wb.x * wb.y) / Iz
     );
     this.angularVelocity.addScaledVector(ab.applyQuaternion(this.quaternion), dt);
-    this.angularVelocity.multiplyScalar(Math.pow(0.985, dt * 60)); // small structural damping only
+    this.angularVelocity.multiplyScalar(Math.pow(groundedWheels ? 0.992 : 0.998, dt * 60)); // structural / air damping only: the tyres do the real work
 
     // Parking sleep: a stationary car must not creep or jitter
     if (groundedWheels >= 3 && this.throttle === 0 && Math.hypot(this.velocity.x, this.velocity.z) < 0.5) {
@@ -273,12 +280,16 @@ export class RaycastVehicle {
     this.enforceGround(groundQuery, terrainHeight);
 
     // Keep car upright stabilization if flipped
-    const roll = this._up.y;
-    if (roll < 0.3) {
-      // Auto righting assist
-      const rightingTorque = new THREE.Vector3(0, 1, 0).cross(this._up).multiplyScalar(-dt * 4);
-      this.quaternion.multiply(new THREE.Quaternion().setFromEuler(new THREE.Euler(rightingTorque.x, 0, rightingTorque.z)));
-    }
+    // Self-righting: only a car lying on its side / roof and nearly stopped gets a gentle roll torque back onto its wheels (never mid-jump)
+    this._up.set(0, 1, 0).applyQuaternion(this.quaternion);
+    if (this._up.y < 0.35 && groundedWheels < 2 && this.velocity.lengthSq() < 9) {
+      this.flipT += dt;
+      if (this.flipT > 0.8) {
+        const ax = this._ax.set(0, 1, 0).cross(this._up); const s = ax.length();
+        if (s < 1e-3) ax.copy(this._forward); else ax.divideScalar(s);   // fully on the roof: roll about the long axis
+        this.angularVelocity.addScaledVector(ax, -dt * 7); this.velocity.y += dt * 6;
+      }
+    } else this.flipT = 0;
 
     // Compute G-forces
     this.gForceLateral = -linearAccel.dot(this._right) / 9.81;
@@ -349,6 +360,11 @@ export class RaycastVehicle {
         if (Math.abs(beta) > 0.07) steerCmd += (Math.abs(this.steerInput) > 0.6 && Math.sign(this.steerInput) === Math.sign(help) ? 0 : help) * THREE.MathUtils.clamp((Math.abs(beta) - 0.07) * 8, 0, 1);
       }
       steerRad = -THREE.MathUtils.clamp(steerCmd, -1.15, 1.15) * THREE.MathUtils.degToRad(lockDeg);
+      if (Math.abs(steerRad) > 1e-3) {   // Ackermann: both front wheels aim at the same turn centre (inner wheel steers more)
+        const Lb = this.config.wheelBaseM, R = Lb / Math.tan(Math.abs(steerRad)), half = this.config.trackWidthM / 2;
+        const inner = (steerRad < 0) === (wheelIndex === 0);   // steerRad < 0 turns the nose toward local -x, where wheel 0 sits: it is the inside wheel
+        steerRad = Math.sign(steerRad) * Math.atan(Lb / (R + (inner ? -half : half)));
+      }
     }
 
     const wheelRot = this._qw.copy(this.quaternion).multiply(this._qs.setFromAxisAngle(RaycastVehicle.Y, steerRad));
@@ -395,8 +411,8 @@ export class RaycastVehicle {
     if (this.brake > 0) {
       // Bias is per axle, so double it for the per-wheel share; the tyre can never give more than mu * N
       const brakeBias = 2 * (wheelIndex < 2 ? this.tuning.brakeBiasFrontPct / 100 : (100 - this.tuning.brakeBiasFrontPct) / 100);
-      const brakeForceN = Math.min(tractionLimit * 1.12, this.brake * (this.tuning.brakePressurePct / 100) * brakeBias * tractionLimit * 1.15);   // peak longitudinal grip sits above lateral; pedal modulates up to it (ABS-like: never beyond)
-      longForceN -= Math.sign(vLong) * Math.min(Math.abs(vLong * this.config.massKg * 0.25), brakeForceN);
+      const brakeForceN = Math.min(tractionLimit, this.brake * (this.tuning.brakePressurePct / 100) * brakeBias * tractionLimit * 1.15);   // peak longitudinal grip sits above lateral; pedal modulates up to it (ABS-like: never beyond)
+      longForceN -= Math.sign(vLong) * Math.min((Math.abs(vLong) * this.config.massKg * 0.5) / (4 * dt), brakeForceN);   // full braking right down to a stop; the cap only stops a step from reversing the wheel
 
       // Heating brake rotors
       w.rotorTemperatureC += this.brake * (normalForceN / 2000) * dt * 90;

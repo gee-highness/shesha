@@ -177,17 +177,17 @@ export class CollisionWorld {
       const corr = Math.max(0, pen - 0.005) * 0.7;
       v.position.x += nx * corr; v.position.z += nz * corr;
       // relative velocity at the contact
-      const vx = v.velocity.x - v.angularVelocity.y * rz - otherVx, vz = v.velocity.z + v.angularVelocity.y * rx - otherVz;
+      const vx = v.velocity.x + v.angularVelocity.y * rz - otherVx, vz = v.velocity.z - v.angularVelocity.y * rx - otherVz;   // v + w x r, w = (0, wy, 0)
       const vn = vx * nx + vz * nz;
       if (vn >= 0) return;
-      const rn = rx * nz - rz * nx; // r x n (y component)
+      const rn = rz * nx - rx * nz; // (r x n).y
       const invM = 1 / m + (otherMass > 0 ? 1 / otherMass : 0);
       const e = Math.max(0.03, 0.2 - 0.012 * -vn); // crashes absorb most energy; gentle bumps bounce a little
       const j = (-(1 + e) * vn) / (invM + (rn * rn) / Iy);
       v.velocity.x += (nx * j) / m; v.velocity.z += (nz * j) / m;
       v.angularVelocity.y += (rn * j) / Iy;
       // Coulomb friction along the surface
-      const tx = -nz, tz = nx, vt = vx * tx + vz * tz, rt = rx * tz - rz * tx;
+      const tx = -nz, tz = nx, vt = vx * tx + vz * tz, rt = rz * tx - rx * tz;
       const jt = Math.max(-0.35 * j, Math.min(0.35 * j, -vt / (invM + (rt * rt) / Iy)));
       v.velocity.x += (tx * jt) / m; v.velocity.z += (tz * jt) / m; v.angularVelocity.y += (rt * jt) / Iy;
       if (-vn > res.impactSpeed) { res.impactSpeed = -vn; res.hitKind = kind; res.hitId = id; }
