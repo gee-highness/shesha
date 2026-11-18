@@ -1,10 +1,11 @@
-import { AfterViewInit, ChangeDetectionStrategy, Component, ElementRef, NgZone, OnDestroy, ViewChild, inject, input, output, signal, computed } from '@angular/core';
+import { AfterViewInit, ChangeDetectionStrategy, Component, ElementRef, NgZone, OnDestroy, ViewChild, inject, input, output, signal, computed, effect, untracked } from '@angular/core';
 import { MatIconModule } from '@angular/material/icon';
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { AssetLibrary } from '../../game/graphics/asset-library';
 import { CAR_CATALOG, DEFAULT_CAR, CAR_CLASSES, CarClass, CarDef, carConfig } from '../../game/cars';
-import { TuningService } from '../../services/tuning.service';
+import { PaintService, type CarPaint } from '../../services/paint.service';
+import type { LiveryChoice, PaintFinish } from '../../game/graphics/car-gen';
 
 @Component({
   selector: 'app-car-select',
@@ -20,6 +21,12 @@ import { TuningService } from '../../services/tuning.service';
     .go{background:linear-gradient(135deg,#fbbf24,#f97316);box-shadow:0 10px 30px rgba(249,115,22,.45)}
     .bar{height:6px;border-radius:3px;background:rgba(255,255,255,.1);overflow:hidden}
     .bar>i{display:block;height:100%;background:linear-gradient(90deg,#22d3ee,#fbbf24)}
+    .shop{background:rgba(9,9,11,.82);backdrop-filter:blur(14px);border:1px solid rgba(255,255,255,.12)}
+    .sw{width:24px;height:24px;border-radius:999px;border:2px solid rgba(255,255,255,.18);cursor:pointer;transition:transform .1s}
+    .sw:hover{transform:scale(1.15)} .sw.on{border-color:#fbbf24;box-shadow:0 0 0 2px rgba(251,191,36,.35)}
+    .pick{width:24px;height:24px;border-radius:999px;overflow:hidden;border:2px dashed rgba(255,255,255,.4);cursor:pointer;position:relative;display:grid;place-items:center;font-size:13px;font-weight:900}
+    .pick input{position:absolute;inset:-6px;opacity:0;cursor:pointer}
+    .lbl{font-size:10px;letter-spacing:.2em;font-weight:800;color:#a1a1aa;margin:10px 0 6px}
   `],
   template: `
     <div class="absolute inset-0 bg-black/65 flex items-center justify-center p-3 sm:p-6 text-white font-sans" (click)="closeModal.emit()">
@@ -47,8 +54,41 @@ import { TuningService } from '../../services/tuning.service';
         </div>
         <!-- preview -->
         <div class="flex-1 flex flex-col min-h-0 relative">
-          <canvas #view class="w-full flex-1 min-h-0"></canvas>
+          <div class="relative flex-1 min-h-0">
+            <canvas #view class="w-full h-full block"></canvas>
+          @if (painting()) {
+            <div class="shop absolute top-16 left-3 w-[262px] max-h-[calc(100%-72px)] overflow-y-auto rounded-2xl p-3.5 text-white" role="region" aria-label="Paint shop">
+              <div class="flex items-center justify-between"><div class="text-sm font-black">Paint shop</div>
+                @if (paintSvc.isCustom(sel())) { <button class="text-[11px] font-bold text-amber-300 cursor-pointer hover:underline" (click)="paintSvc.reset(sel())">Reset to factory</button> }</div>
+              <div class="text-[11px] text-zinc-400">Saved for {{ sel().name }}</div>
+              <div class="lbl">BODY</div>
+              <div class="flex flex-wrap gap-1.5">
+                @for (c of bodies; track c) { <button class="sw" [class.on]="p().body === c" [style.background]="c" (click)="set({ body: c })" [attr.aria-label]="'Body ' + c"></button> }
+                <label class="pick" [style.background]="p().body" title="Any colour"><span class="mix-blend-difference">+</span><input type="color" [value]="p().body" (input)="set({ body: val($event) })" aria-label="Custom body colour"></label>
+              </div>
+              <div class="lbl">FINISH</div>
+              <div class="grid grid-cols-4 gap-1">
+                @for (f of finishes; track f.id) { <button class="chip py-1 rounded-lg text-[10.5px] font-bold border cursor-pointer" [class.bg-amber-400]="p().finish === f.id" [class.text-zinc-950]="p().finish === f.id" [class.border-white/20]="p().finish !== f.id" (click)="set({ finish: f.id })">{{ f.name }}</button> }
+              </div>
+              <div class="lbl">STRIPES &amp; LIVERY</div>
+              <div class="grid grid-cols-3 gap-1">
+                @for (l of liveries; track l.id) { <button class="chip py-1 rounded-lg text-[10.5px] font-bold border cursor-pointer" [class.bg-amber-400]="p().livery === l.id" [class.text-zinc-950]="p().livery === l.id" [class.border-white/20]="p().livery !== l.id" (click)="set({ livery: l.id })">{{ l.name }}</button> }
+              </div>
+              <div class="lbl">ACCENT <span class="tracking-normal font-semibold text-zinc-500">· stripes, roof, livery</span></div>
+              <div class="flex flex-wrap gap-1.5">
+                @for (c of accents; track c) { <button class="sw" [class.on]="p().accent === c" [style.background]="c" (click)="set({ accent: c })" [attr.aria-label]="'Accent ' + c"></button> }
+                <label class="pick" [style.background]="p().accent" title="Any colour"><span class="mix-blend-difference">+</span><input type="color" [value]="p().accent" (input)="set({ accent: val($event) })" aria-label="Custom accent colour"></label>
+              </div>
+              <div class="lbl">WHEELS</div>
+              <div class="flex flex-wrap gap-1.5">
+                @for (c of rims; track c) { <button class="sw" [class.on]="p().rim === c" [style.background]="c" (click)="set({ rim: c })" [attr.aria-label]="'Wheels ' + c"></button> }
+                <label class="pick" [style.background]="p().rim" title="Any colour"><span class="mix-blend-difference">+</span><input type="color" [value]="p().rim" (input)="set({ rim: val($event) })" aria-label="Custom wheel colour"></label>
+              </div>
+            </div>
+          }
+          </div>
           <button class="absolute top-3 right-3 w-10 h-10 rounded-full bg-black/50 grid place-items-center cursor-pointer hover:bg-white/15" (click)="closeModal.emit()" aria-label="Close"><mat-icon>close</mat-icon></button>
+          <button class="absolute top-3 left-3 h-10 px-4 rounded-full grid grid-flow-col items-center gap-1.5 cursor-pointer text-xs font-black tracking-wider" [class.bg-amber-400]="painting()" [class.text-zinc-950]="painting()" [class.bg-black/50]="!painting()" (click)="painting.set(!painting())" aria-label="Paint shop"><mat-icon class="!text-[18px] !w-[18px] !h-[18px]">palette</mat-icon>PAINT</button>
           <div class="p-4 sm:p-5 flex flex-col sm:flex-row sm:items-end gap-4 border-t border-white/10">
             <div class="flex-1">
               <div class="text-2xl font-black leading-tight">{{ sel().name }}</div>
@@ -89,7 +129,20 @@ export class CarSelectComponent implements AfterViewInit, OnDestroy {
   private pivot = new THREE.Group();
   private raf = 0; private token = 0;
 
-  private tuning = inject(TuningService);
+  readonly paintSvc = inject(PaintService);
+  readonly painting = signal(false);
+  readonly p = computed(() => this.paintSvc.get(this.sel()));
+  readonly bodies = ['#d7263d', '#ff6b1a', '#f2a900', '#ffe14d', '#0f8b5f', '#7ed957', '#00a6c8', '#1b4fd8', '#2e3a59', '#7b2cbf', '#ff4fa3', '#f5f5f2', '#9aa3ad', '#16181d'];
+  readonly accents = ['#ffffff', '#16181d', '#d7263d', '#f2a900', '#00a6c8', '#7ed957', '#ff4fa3', '#c0c4c9'];
+  readonly rims = ['#c8ccd1', '#3a3d42', '#111214', '#d4a017', '#8c6a3c', '#f2f2f2', '#c1121f', '#00a6c8'];
+  readonly finishes: { id: PaintFinish; name: string }[] = [{ id: 'metallic', name: 'Metallic' }, { id: 'gloss', name: 'Gloss' }, { id: 'matte', name: 'Matte' }, { id: 'pearlescent', name: 'Pearl' }];
+  readonly liveries: { id: LiveryChoice; name: string }[] = [{ id: 'factory', name: 'Factory' }, { id: 'none', name: 'Clean' }, { id: 'racing', name: 'Racing' }, { id: 'twin', name: 'Twin' }, { id: 'side', name: 'Side' }, { id: 'stripe', name: 'Waist' }];
+  /** Re-dress the showroom car whenever its paint changes (keeps the turntable angle). */
+  private repaint = effect(() => { this.p(); const d = this.sel(); untracked(() => { if (this.renderer) this.show(d); }); });
+  /** With the paint shop open, slide the turntable to the right of the panel so the whole car stays in view. */
+  private slide = effect(() => { const on = this.painting(); this.pivot.position.set(on ? 1.15 : 0, 0, on ? -1.15 : 0); });
+  set(patch: Partial<CarPaint>): void { this.paintSvc.set(this.sel(), patch); }
+  val(e: Event): string { return (e.target as HTMLInputElement).value; }
   drive(c: CarDef): string { return carConfig(c).driveType; }
   pick(c: CarDef): void { this.sel.set(c); this.show(c); }
 
@@ -121,7 +174,7 @@ export class CarSelectComponent implements AfterViewInit, OnDestroy {
 
   private async show(def: CarDef): Promise<void> {
     const t = ++this.token;
-    const car = await AssetLibrary.preview(def, this.tuning.visuals().bodyColor).catch(() => null);
+    const car = await AssetLibrary.preview(def, this.paintSvc.get(def)).catch(() => null);
     if (!car || t !== this.token) return;
     this.pivot.clear();
     const box = new THREE.Box3().setFromObject(car), size = box.getSize(new THREE.Vector3());

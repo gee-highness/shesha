@@ -9,7 +9,7 @@ import {
   PLATFORM_ID,
   ViewChild,
   inject,
-  signal, effect } from '@angular/core';
+  signal, effect, untracked } from '@angular/core';
 import { CommonModule, isPlatformBrowser } from '@angular/common';
 import { MatIconModule } from '@angular/material/icon';
 import * as THREE from 'three';
@@ -36,6 +36,7 @@ import { RaycastVehicle } from './game/physics/raycast-vehicle';
 // Components
 import { CarSelectComponent } from './components/car-select/car-select.component';
 import { CAR_CATALOG, DEFAULT_CAR, CarDef, carConfig } from './game/cars';
+import { PaintService, type CarPaint } from './services/paint.service';
 import { ControllerSetupComponent } from './components/controller-setup/controller-setup.component';
 import { MultiplayerComponent } from './components/multiplayer/multiplayer.component';
 import { MultiplayerService, FLAG } from './services/multiplayer.service';
@@ -85,6 +86,14 @@ export class App implements AfterViewInit, OnDestroy {
   private mouseLook = false; private mlx = 0; private mly = 0;
   public audioService = inject(AudioService);
   public tuningService = inject(TuningService);
+  public paint = inject(PaintService);
+  private paintKey = '';
+  /** Repaint the car being driven whenever its paint job changes (garage or Tuning > Visuals); physics untouched. */
+  private paintFx = effect(() => { const p = this.paint.currentPaint(), def = this.paint.current(); untracked(() => this.dressCar(def, p)); });
+  private dressCar(def: CarDef, p: CarPaint): void {
+    const key = def.id + JSON.stringify(p); if (!this.sceneManager || key === this.paintKey) return; this.paintKey = key;
+    this.sceneManager.spawnVehicle(this.tuningService.getActiveConfig(), this.tuningService.visuals(), def, p);
+  }
   public telemetryService = inject(TelemetryService);
   public envService = inject(EnvironmentService);
   public festivalService = inject(FestivalService);
@@ -106,7 +115,7 @@ export class App implements AfterViewInit, OnDestroy {
   readonly currentCar = signal<CarDef>(DEFAULT_CAR);
 
   public onChooseCar(def: CarDef): void {
-    this.currentCar.set(def);
+    this.currentCar.set(def); this.paint.current.set(def);
     this.tuningService.setCar(carConfig(def));
     queueMicrotask(() => this.mp.announceCar());
     const config = this.tuningService.getActiveConfig();
@@ -115,7 +124,7 @@ export class App implements AfterViewInit, OnDestroy {
     this.vehicle.position.copy(old.position); this.vehicle.position.y += 0.6;
     const yaw = new THREE.Euler().setFromQuaternion(old.quaternion, 'YXZ').y;
     this.vehicle.quaternion.setFromAxisAngle(new THREE.Vector3(0, 1, 0), yaw);
-    this.sceneManager.spawnVehicle(config, this.tuningService.visuals(), def);
+    this.paintKey = ''; this.dressCar(def, this.paint.get(def));
     this.showCars.set(false);
   }
   public begin(): void { this.audioService.unlockAudio(); this.started.set(true); this.watchInput(); try { window.focus(); } catch { /* embedded preview */ } }
@@ -159,7 +168,7 @@ export class App implements AfterViewInit, OnDestroy {
   }
 
   private initGame(): void {
-    this.mp.getLoadout = () => ({ car: this.currentCar().id, color: this.tuningService.visuals().bodyColor });
+    this.mp.getLoadout = () => ({ car: this.currentCar().id, color: this.paint.get(this.currentCar()).body });
     this.mp.onEvent = (m) => this.raceSvc.flash(m);
     const container = this.canvasContainerRef.nativeElement;
 
@@ -174,7 +183,7 @@ export class App implements AfterViewInit, OnDestroy {
       this.vehicle = new RaycastVehicle(config, tuning);
 
       // Spawn 3D Vehicle mesh in Three.js
-      this.sceneManager.spawnVehicle(config, this.tuningService.visuals(), this.currentCar());
+      this.paint.current.set(this.currentCar()); this.dressCar(this.currentCar(), this.paint.get(this.currentCar()));
 
       // Create Traffic Simulator (paused until it follows the real OSM road graph)
 
