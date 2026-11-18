@@ -21,6 +21,13 @@ export class CameraRig {
   // Free-look (right stick / mouse drag): yaw about the car, pitch up/down; eases back to centre when released.
   public lookYaw = 0; public lookPitch = 0; private lookIdle = 0;
   /** x,y in -1..1 (stick) per frame. */
+  /** Crash shake amplitude in metres; decays on its own. */
+  public shake = 0;
+  public applyShake(dt: number): void {
+    if (this.shake < 0.004) { this.shake = 0; return; }
+    const a = this.shake; this.camera.position.x += (Math.random() - 0.5) * a; this.camera.position.y += (Math.random() - 0.5) * a; this.camera.position.z += (Math.random() - 0.5) * a;
+    this.shake *= Math.exp(-7 * dt);
+  }
   public look(x: number, y: number, dt: number): void {
     if (Math.abs(x) > 0.001 || Math.abs(y) > 0.001) {
       this.lookIdle = 0;

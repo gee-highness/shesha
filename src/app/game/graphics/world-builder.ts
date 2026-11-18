@@ -24,6 +24,7 @@ interface WorldMeta {
   snaps: Record<string, [number, number]>;
 }
 interface Surf { way: RoadWay; h: number; elev: boolean; px: number; pz: number; d: number }
+import { PAVE_LIFT } from './street-constants';
 export interface RoadWay { c: number; w: number; u: number; o: number; n: string; p: number[]; sw?: number; bay?: number; dz?: number[]; br?: number; bk?: number; ms?: number; rg?: number; rb?: number }
 
 import { GeoBuf } from './geo-buf';
@@ -141,7 +142,16 @@ export class WorldBuilder {
   }
 
   /** Is (x,z) on a kerbed pavement beside a road? (visible geometry is built by StreetBuilder) */
-  public onPavement(x: number, z: number): boolean {
+  public onPavement(x: number, z: number): boolean { return this.pavementTop(x, z) !== null; }
+
+  private snapList?: [number, number][];
+  /** Pavement zone: everywhere. Kept as one function so the visible pavements and the physics always agree. */
+  public pavedZone(x: number, z: number): boolean {
+    return true;   // every paved street gets raised pavements (unpaved tracks and bridges are excluded by the builder)
+  }
+
+  /** Height of the pavement top above bare terrain at (x,z) (carriageway lift of the street it borders + kerb height), or null if this is not pavement. */
+  public pavementTop(x: number, z: number): number | null {
     const cx = Math.floor(x / 50), cz = Math.floor(z / 50);
     for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) {
       const list = this.cellRoads.get((cx + a) * 100003 + (cz + b)); if (!list) continue;
@@ -149,10 +159,10 @@ export class WorldBuilder {
         const way = this.roadWays[list[k]]; if (!way.sw) continue; const p = way.p, i = list[k + 1];
         const ax = p[i] / 10, az = p[i + 1] / 10, dx = p[i + 2] / 10 - ax, dz = p[i + 3] / 10 - az, l2 = dx * dx + dz * dz || 1;
         const t = Math.max(0, Math.min(1, ((x - ax) * dx + (z - az) * dz) / l2)); const d = Math.hypot(x - ax - t * dx, z - az - t * dz);
-        if (d > way.w / 2 + 0.3 && d < way.w / 2 + 0.05 + way.sw && this.buildingsNear(x, z) >= 4) return true;
+        if (d > way.w / 2 + 0.3 && d < way.w / 2 + 0.05 + way.sw && this.pavedZone(x, z)) return WorldBuilder.ROAD_LIFT[way.c] + PAVE_LIFT;
       }
     }
-    return false;
+    return null;
   }
 
   /** Distance from a point to the nearest drawable road centreline (class <= maxC). */
@@ -364,15 +374,15 @@ export class WorldBuilder {
     if (roofH !== null && (!rs || roofH > rs.h)) return roofH;
     if (rs) return rs.h;
     const base = this.calculateRawTerrainHeight(x, z);
-    return this.onPavement(x, z) ? base + WorldBuilder.ROAD_LIFT[4] + 0.15 : base;
+    return base + (this.pavementTop(x, z) ?? 0);
   }
 
   public queryGround(x: number, z: number, y?: number): GroundQueryResult {
     const roofH = y === undefined ? null : this.collision.roofAt(x, z, y);
     if (roofH !== null) { const r0 = this.roadSurface(x, z, y); if (!r0 || roofH > r0.h) return { height: roofH, normal: new THREE.Vector3(0, 1, 0), surfaceClass: 9, surfaceName: 'Rooftop' }; }
     const rs = this.roadSurface(x, z, y); const road = rs?.way ?? null;
-    const pave = !road && this.onPavement(x, z);
-    let height = rs ? rs.h : this.calculateRawTerrainHeight(x, z) + (pave ? WorldBuilder.ROAD_LIFT[4] + 0.15 : 0);
+    const pt = road ? null : this.pavementTop(x, z), pave = pt !== null;
+    let height = rs ? rs.h : this.calculateRawTerrainHeight(x, z) + (pt ?? 0);
     if (rs && !rs.elev) height += this.bumpAt(x, z);
     if (road?.rg) height += 0.035 * Math.sin(x * 3.1 + z * 2.3) * Math.sin(x * 1.7 - z * 2.9) + 0.02 * Math.sin(x * 7.3 + z * 5.1); // washboard / potholes on roads tagged rough
     const e = 2.5; let normal: THREE.Vector3;
@@ -794,15 +804,15 @@ export class WorldBuilder {
     const trunk = new THREE.CylinderGeometry(0.2, 0.32, 3.2, 5); trunk.translate(0, 1.6, 0);
     const mkCanopy = (r: number, y: number) => { const g = new THREE.IcosahedronGeometry(r, 0); g.translate(0, y, 0); return g; };
     const paint = (g: THREE.BufferGeometry, c: THREE.Color) => { const a = new Float32Array(g.attributes['position'].count * 3); for (let i = 0; i < a.length; i += 3) { a[i] = c.r; a[i + 1] = c.g; a[i + 2] = c.b; } g.setAttribute('color', new THREE.BufferAttribute(a, 3)); return g.toNonIndexed(); };
-    const geo = mergeGeometries([paint(trunk, new THREE.Color(1.2, 0.5, 0.85)), paint(mkCanopy(2.4, 4.4), new THREE.Color(0xffffff)), paint(mkCanopy(1.7, 5.8), new THREE.Color(0xffffff))].map((g) => { g.deleteAttribute('uv'); return g; }))!;
+    const geo = mergeGeometries([paint(trunk, new THREE.Color(0.5, 0.36, 0.27)), paint(mkCanopy(2.4, 4.4), new THREE.Color(0xffffff)), paint(mkCanopy(1.7, 5.8), new THREE.Color(0xffffff))].map((g) => { g.deleteAttribute('uv'); return g; }))!;
     // conifer / eucalyptus-pine (tall, narrow, stacked cones) and palm (slender trunk + flat fan crown): species vary by altitude and place
     const cone = (r: number, h: number, y: number) => { const g = new THREE.ConeGeometry(r, h, 6); g.translate(0, y, 0); return g; };
-    const geoCon = mergeGeometries([paint(trunk, new THREE.Color(3.4, 1.0, 2.2)), paint(cone(2.0, 3.4, 4.2), new THREE.Color(0xffffff)), paint(cone(1.5, 3.0, 6.0), new THREE.Color(0xffffff)), paint(cone(1.0, 2.6, 7.6), new THREE.Color(0xffffff))].map((g) => { g.deleteAttribute('uv'); return g; }))!;
+    const geoCon = mergeGeometries([paint(trunk, new THREE.Color(0.5, 0.36, 0.27)), paint(cone(2.0, 3.4, 4.2), new THREE.Color(0xffffff)), paint(cone(1.5, 3.0, 6.0), new THREE.Color(0xffffff)), paint(cone(1.0, 2.6, 7.6), new THREE.Color(0xffffff))].map((g) => { g.deleteAttribute('uv'); return g; }))!;
     const ptrunk = new THREE.CylinderGeometry(0.14, 0.22, 7.2, 5); ptrunk.translate(0, 3.6, 0);
     const crown = new THREE.ConeGeometry(2.8, 1.1, 7); crown.translate(0, 7.6, 0);
     const crown2 = new THREE.ConeGeometry(1.5, 0.9, 7); crown2.translate(0, 8.2, 0);
     const geoPalm = mergeGeometries([paint(ptrunk, new THREE.Color(0x8d7d5e)), paint(crown, new THREE.Color(0x3f7d2c)), paint(crown2, new THREE.Color(0x4f9236))].map((g) => { g.deleteAttribute('uv'); return g; }))!;
-    const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.92, flatShading: true });
+    const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.5, metalness: 0.2, flatShading: true, emissive: 0x04100a });
     const TCH = 300;   // tree cells: small enough that distant trees really drop out (was one 800 m block)
     const sn = this.meta.snaps as Record<string, [number, number]> | undefined;
     const cbd = (x: number, z: number): boolean => !!sn && ['manzini', 'matsapha'].some((k) => sn[k] && Math.hypot(sn[k][0] - x, sn[k][1] - z) < 900);
@@ -829,9 +839,10 @@ export class WorldBuilder {
         im.setMatrixAt(i, m4);
         const r = WorldBuilder.hash(t.x * 2, t.z * 3);
         if (sp === 2) return;                                                           // palm keeps its baked colours
-        if (sp === 1) col.setRGB(0.07 + r * 0.05, 0.22 + r * 0.12, 0.1 + r * 0.05);
-        else if (t.c === 10 || (t.c === 8 && r > 0.82)) col.setRGB(0.5 + r * 0.1, 0.34, 0.74); // jacaranda blossom
-        else col.setRGB(0.22 + r * 0.12, 0.42 + r * 0.14, 0.18 + r * 0.06);
+        // Manzini's real street trees: green canopies, flamboyants (red-orange) and jacarandas (violet); blossom runs above 1 so it glows
+        const hk = WorldBuilder.hash(t.x * 5, t.z * 7), sh = 0.85 + r * 0.3;
+        const pc = sp === 1 ? [0.16, 0.42, 0.2] : hk < 0.14 ? [1.4, 0.3, 0.1] : hk < 0.25 ? [0.72, 0.46, 1.35] : hk < 0.5 ? [0.16, 0.42, 0.17] : hk < 0.75 ? [0.23, 0.53, 0.2] : [0.12, 0.34, 0.16];
+        col.setRGB(pc[0] * sh, pc[1] * sh, pc[2] * sh);
         im.setColorAt(i, col);
       });
       im.userData['far'] = 380; im.computeBoundingSphere();
@@ -851,7 +862,7 @@ export class WorldBuilder {
     return false;
   }
 
-  private nearBuilding(x: number, z: number): boolean {
+  public nearBuilding(x: number, z: number): boolean {
     const cx = Math.floor(x / 40), cz = Math.floor(z / 40);
     for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) {
       const l = this.bGrid.get((cx + a) * 100003 + (cz + b)); if (!l) continue;
@@ -891,8 +902,8 @@ export class WorldBuilder {
     const armG = new THREE.BoxGeometry(2.6, 0.12, 0.14); armG.translate(1.3, 9, 0);
     const headG = new THREE.BoxGeometry(0.9, 0.16, 0.38); headG.translate(2.5, 8.9, 0);
     const pole = mergeGeometries([poleG, armG].map((g) => g.toNonIndexed()))!;
-    const poleM = new THREE.MeshStandardMaterial({ color: 0x8a9096, metalness: 0.8, roughness: 0.35 });
-    const headM = new THREE.MeshBasicMaterial({ color: 0xfff1c0 });
+    const poleM = new THREE.MeshStandardMaterial({ color: 0x1c2740, metalness: 0.85, roughness: 0.25, emissive: 0x062a3a });
+    const headM = new THREE.MeshBasicMaterial({ color: 0xb8f4ff });
     const spots: { x: number; z: number; rot: number }[] = [];
     // real OSM street lamps first (arm turned toward the nearest carriageway); procedural ones then skip anywhere near a real lamp
     for (const [lx, lz] of this.meta.lamps ?? []) {
@@ -925,7 +936,7 @@ export class WorldBuilder {
     for (const l of this.lampSpots) { const k = `${Math.floor(l.x / CHUNK)},${Math.floor(l.z / CHUNK)}`; let a = byChunk.get(k); if (!a) { a = []; byChunk.set(k, a); } a.push(l); }
     byChunk.forEach((list, key) => {
       const poles = new THREE.InstancedMesh(pole, poleM, list.length), heads = new THREE.InstancedMesh(headG, headM, list.length); poles.name = heads.name = 'lamps';
-      list.forEach((s, i) => { q.setFromAxisAngle(up, s.rot); m4.compose(new THREE.Vector3(s.x, this.calculateRawTerrainHeight(s.x, s.z) + (this.onPavement(s.x, s.z) ? 0.3 : 0), s.z), q, new THREE.Vector3(1, 1, 1)); poles.setMatrixAt(i, m4); heads.setMatrixAt(i, m4); });
+      list.forEach((s, i) => { q.setFromAxisAngle(up, s.rot); m4.compose(new THREE.Vector3(s.x, this.calculateRawTerrainHeight(s.x, s.z) + (this.pavementTop(s.x, s.z) ?? 0), s.z), q, new THREE.Vector3(1, 1, 1)); poles.setMatrixAt(i, m4); heads.setMatrixAt(i, m4); });
       // stylised light pool on the ground under each lamp (additive, strength follows the night factor)
       { this.glowMat ??= this.makeGlowMat(); const glow = new THREE.InstancedMesh(WorldBuilder.glowGeo(), this.glowMat, list.length); glow.name = 'lamp-glow'; glow.renderOrder = 3;
         list.forEach((l2, i) => { const gx = l2.x + Math.cos(l2.rot) * 2.3, gz = l2.z - Math.sin(l2.rot) * 2.3; m4.compose(new THREE.Vector3(gx, this.groundHeightAt(gx, gz) + 0.07, gz), new THREE.Quaternion(), new THREE.Vector3(1, 1, 1)); glow.setMatrixAt(i, m4); });

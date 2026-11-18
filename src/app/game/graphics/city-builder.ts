@@ -130,7 +130,7 @@ export class CityBuilder {
           float st = min(floor(vWin + 0.001), 7.0), sd = floor(fract(vWin) * 1000.0 + 0.5) / 1000.0;
           float bay = fract(vWUv.x), flr = fract(vWUv.y), fl = floor(vWUv.y), bi = floor(vWUv.x);
           float win = 0.0, door = 0.0, mull = 0.0, glass = 0.0, trim = 0.0, sill = 0.0, lintel = 0.0, frame = 0.0;
-          if (st > 0.5) {
+          if (st > 0.5 && vWUv.y >= 0.0) {
             // baked mask atlas: 8 styles across, ground floor / upper floor rows; R=window G=glass B=mullion A=door zone
             vec2 tuv = vec2((st + clamp(bay, 0.008, 0.992)) / 8.0, (min(fl, 1.0) + clamp(flr, 0.008, 0.992)) / 2.0);
             vec4 wm = textureGrad(uWinAtlas, tuv, dFdx(vWUv) * vec2(0.125, 0.5), dFdy(vWUv) * vec2(0.125, 0.5));
@@ -148,14 +148,14 @@ export class CityBuilder {
           vec3 glassCol = mix(vec3(0.05,0.08,0.11), vec3(0.16,0.3,0.36), glass * 0.8);
           vec3 neonCol = mix(vec3(0.1,0.9,1.0), vec3(1.0,0.22,0.8), step(0.62, h11(sd*37.0 + 3.0)));
           glassCol = mix(glassCol, mix(vec3(0.02,0.05,0.09), vec3(0.05,0.3,0.45), glass*0.7 + 0.25), uNeo);
-          float lit = step(mix(0.78, 0.3, uNeo), h11(bi*13.1 + fl*7.7 + sd*91.0)) * max(uNight, uNeo) * win;
-          diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * 0.3 + vec3(0.015,0.025,0.045), uNeo * (1.0 - win));
+          float lit = step(mix(0.78, 0.5, uNeo), h11(bi*13.1 + fl*7.7 + sd*91.0)) * max(uNight, uNeo * 0.14) * win;
+          diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * 0.74 + vec3(0.0,0.012,0.03), uNeo * (1.0 - win));
           diffuseColor.rgb = mix(diffuseColor.rgb, glassCol, win * 0.92);
           diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.5,0.5,0.52), mull * 0.6 * step(0.5, st));
           diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.13,0.08,0.06), door * 0.9);
           // architectural detail: window frames, painted trim, projecting sills (lit top, shadowed underside), lintels, floor slab bands, ground-floor grime, sky reflection
           diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.16,0.17,0.19), frame * 0.85 * step(0.5, st));
-          diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.93,0.91,0.86), trim * 0.55 * (1.0 - win) * step(0.5, st) * (1.0 - uNeo));
+          diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.93,0.91,0.86), trim * 0.55 * (1.0 - win) * step(0.5, st) * (1.0 - uNeo * 0.35));
           diffuseColor.rgb *= 1.0 - 0.28 * lintel * (1.0 - win) * step(0.5, st);
           diffuseColor.rgb *= 1.0 + 0.14 * sill * (1.0 - win) * step(0.5, st);
           float slabBand = (1.0 - smoothstep(0.0, 0.035, abs(flr - 0.015))) * step(1.0, vWUv.y) * (1.0 - win);
@@ -163,20 +163,20 @@ export class CityBuilder {
           float baseG = 1.0 - smoothstep(0.0, 0.42, vWUv.y);
           diffuseColor.rgb *= 1.0 - baseG * (0.3 + 0.2 * h11(bi * 5.3 + sd * 17.0));
           float refl = smoothstep(0.35, 0.95, fract(bay * 0.7 + flr * 0.6 + sd * 3.0));
-          diffuseColor.rgb += vec3(0.2, 0.32, 0.4) * refl * win * (0.3 + 0.7 * glass) * (1.0 - uNight * 0.85) * (1.0 - uNeo);`)
+          diffuseColor.rgb += vec3(0.2, 0.32, 0.4) * refl * win * (0.3 + 0.7 * glass) * (1.0 - uNight * 0.85) * (1.0 - uNeo * 0.25);`)
         .replace('#include <roughnessmap_fragment>', `#include <roughnessmap_fragment>
           roughnessFactor = mix(roughnessFactor, 0.05, win * 0.9);`)
         .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
           totalEmissiveRadiance += lit * mix(vec3(1.0, 0.72, 0.36), neonCol, uNeo) * 0.95;
-          totalEmissiveRadiance += uNeo * smoothstep(0.92, 0.985, flr) * neonCol * 1.3 * step(0.5, st);`);
+          totalEmissiveRadiance += uNeo * smoothstep(0.955, 0.99, flr) * step(0.0, vWUv.y) * neonCol * mix(0.3, 1.3, uNight) * step(0.5, st);`);
     };
   }
 
-  /** Neo theme only (decided when a chunk is generated): taller towers where the OSM footprint density is high. */
+  /** Neo theme only (decided when a chunk is generated): a slight lift for big CBD blocks; the real massing stays. */
   private neoHeight(cx: number, cz: number, area: number): number {
-    if (typeof localStorage === 'undefined' || localStorage.getItem('shesha.theme') !== 'NEO') return 1;
+    if (typeof localStorage === 'undefined' || localStorage.getItem('shesha.theme') === 'REAL') return 1;
     const l = this.pending.get(`${Math.floor(cx / CH)},${Math.floor(cz / CH)}`); const density = l ? l.length : 0;
-    return 1 + Math.min(2.2, density / 260) * Math.min(1, Math.sqrt(area) / 14);
+    return 1 + Math.min(0.3, density / 900) * Math.min(1, Math.sqrt(area) / 12);   // Manzini is low-rise (2-8 floors): keep the real skyline
   }
 
   // ------------------------------------------------------------------ main
@@ -355,7 +355,16 @@ export class CityBuilder {
     }
     const boost = st.wall === 'plaster' ? 1.0 : st.wall === 'concrete' ? 0.98 : st.wall === 'brick' ? 1.05 : 1.15;
     st.tint = st.tint.map((v) => v * boost);
-    const h = (hdm / 10) * this.neoHeight(cx, cz, area); const top = maxH + h;
+    // CBD from street-level photos: Bhunu Mall is red face-brick with SHOPRITE lettering on Nkoseluhlaza Street; a tan concrete
+    // "Manzini Shopping Mall" block and a glass office tower stand on Ngwane Street (those two positions are inferred); brick is common downtown
+    const isBhunu = use === 5 && area > 8000 && Math.hypot(cx + 490, cz - 30) < 60, isTan = area > 900 && Math.hypot(cx + 550, cz + 78) < 14, isGlass = use === 6 && Math.hypot(cx + 394, cz - 65) < 25;
+    if (isBhunu) { st.wall = 'brick'; st.tint = [0.7, 0.36, 0.28]; }
+    else if (isTan) { st.wall = 'concrete'; st.tint = [0.9, 0.72, 0.48]; st.roof = 'flat'; st.awn = true; }
+    else if (isGlass) { st.wall = 'concrete'; st.tint = [0.42, 0.56, 0.68]; st.win = 3; }
+    else if (use >= 3 && use <= 6 && this.inCbd(cx, cz) && (seed * 7) % 10 < 4) { st.wall = 'brick'; st.tint = pick(BRICK, r * 5.7); }
+    const h = isTan ? 14 : isGlass ? 30 : (hdm / 10) * this.neoHeight(cx, cz, area); const top = maxH + h;
+    if (isBhunu && !this.mallSign) { this.mallSign = true; this.paintedName(pts, cx, cz, top, /nkos/i, ['SHOPRITE'], '#8f4a3a', '#d21f26'); }
+    if (isTan && !this.tanSign) { this.tanSign = true; this.paintedName(pts, cx, cz, top, /ngwane/i, ['MANZINI', 'SHOPPING MALL'], '#c4ad86', '#2a2420'); }
     const wallBuf = this.buf(cx, cz, st.wall);
     const winCode = st.win + Math.min(0.99, r);
 
@@ -364,10 +373,10 @@ export class CityBuilder {
     for (let i = 0; i < n; i++) {
       const a = pts[i], c = pts[(i + 1) % n]; const dx = c[0] - a[0], dz = c[1] - a[1]; const len = Math.hypot(dx, dz); if (len < 0.2) continue;
       const nx = dz / len, nz = -dx / len, ya = hs[i] - 0.5, yb = hs[(i + 1) % n] - 0.5, u0 = u / 3, u1 = (u + len) / 3; u += len;
-      const i0 = wallBuf.vert(a[0], ya, a[1], nx, 0, nz, u0, 0, st.tint, winCode);
-      const i1 = wallBuf.vert(c[0], yb, c[1], nx, 0, nz, u1, 0, st.tint, winCode);
-      const i2 = wallBuf.vert(c[0], top, c[1], nx, 0, nz, u1, (top - yb) / 3.2, st.tint, winCode);
-      const i3 = wallBuf.vert(a[0], top, a[1], nx, 0, nz, u0, (top - ya) / 3.2, st.tint, winCode);
+      const i0 = wallBuf.vert(a[0], ya, a[1], nx, 0, nz, u0, (ya - maxH) / 3.2, st.tint, winCode);
+      const i1 = wallBuf.vert(c[0], yb, c[1], nx, 0, nz, u1, (yb - maxH) / 3.2, st.tint, winCode);
+      const i2 = wallBuf.vert(c[0], top, c[1], nx, 0, nz, u1, (top - maxH) / 3.2, st.tint, winCode);
+      const i3 = wallBuf.vert(a[0], top, a[1], nx, 0, nz, u0, (top - maxH) / 3.2, st.tint, winCode);
       wallBuf.tri(i0, i2, i1); wallBuf.tri(i0, i3, i2);
     }
 
@@ -517,12 +526,29 @@ export class CityBuilder {
     return best;
   }
 
+  private mallSign = false; private tanSign = false;
+  /** Lettering fixed straight onto the wall that faces the named street, as on the real buildings. */
+  private paintedName(pts: [number, number][], cx: number, cz: number, top: number, street: RegExp, lines: string[], bg: string, fg: string): void {
+    const w = this.w, n = pts.length; let best = -1, bs = 1e9;
+    for (let i = 0; i < n; i++) { const a = pts[i], c = pts[(i + 1) % n], len = Math.hypot(c[0] - a[0], c[1] - a[1]); if (len < 14) continue;
+      const mx = (a[0] + c[0]) / 2, mz = (a[1] + c[1]) / 2, rd = w.nearestRoadSegment(mx, mz, 8); const s = (rd ? rd.dist : 200) - (rd && street.test(rd.way.n) ? 60 : 0) - len * 0.05; if (s < bs) { bs = s; best = i; } }
+    if (best < 0) return; const a = pts[best], c = pts[(best + 1) % n]; const mx = (a[0] + c[0]) / 2, mz = (a[1] + c[1]) / 2, len = Math.hypot(c[0] - a[0], c[1] - a[1]);
+    let nx = (c[1] - a[1]) / len, nz = -(c[0] - a[0]) / len; if (nx * (mx - cx) + nz * (mz - cz) < 0) { nx = -nx; nz = -nz; }
+    const cv = document.createElement('canvas'); cv.width = 1024; cv.height = 300; const g2 = cv.getContext('2d')!;
+    g2.fillStyle = bg; g2.fillRect(0, 0, 1024, 300); g2.fillStyle = fg; g2.textAlign = 'center'; g2.textBaseline = 'middle';
+    const fs = lines.length === 1 ? 190 : 118; g2.font = `900 ${fs}px sans-serif`; lines.forEach((t, i) => g2.fillText(t, 512, 150 + (i - (lines.length - 1) / 2) * fs * 1.08, 980));
+    const tex = new THREE.CanvasTexture(cv); tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = 4;
+    const wd = Math.min(20, len * 0.8), m = new THREE.Mesh(new THREE.PlaneGeometry(wd, wd * 0.293), new THREE.MeshStandardMaterial({ map: tex, roughness: 0.9, side: THREE.DoubleSide }));
+    m.position.set(mx + nx * 0.25, top - wd * 0.293 / 2 - 0.9, mz + nz * 0.25); m.rotation.y = Math.atan2(nx, nz); m.name = 'wall-name';
+    w.landmarksGroup.add(m); w.registerChunk(m, mx, mz, 12, 600);
+  }
+
   private awning(b: GeoBuf, pts: [number, number][], i: number, hs: number[], r: number): void {
     const n = pts.length, a = pts[i], c = pts[(i + 1) % n]; const dx = c[0] - a[0], dz = c[1] - a[1], len = Math.hypot(dx, dz);
     const nx = dz / len, nz = -dx / len, tx = dx / len, tz = dz / len;
     const vera = this.inCbd(a[0], a[1]) && len >= 6;                       // town-centre shop rows: continuous verandah over the pavement, posts at the kerb
     const wdt = vera ? Math.min(len * 0.98, 30) : Math.min(len * 0.9, 12), s0 = (len - wdt) / 2;
-    const col = vera ? [0.45, 0.47, 0.5] : pick(AWNING, r * 5.3), y = (hs[i] + hs[(i + 1) % n]) / 2;
+    const col = vera ? pick([[0.1, 0.42, 0.24], [0.86, 0.82, 0.7], [0.7, 0.6, 0.46], [0.45, 0.47, 0.5]], r * 7.1) : pick(AWNING, r * 5.3), y = (hs[i] + hs[(i + 1) % n]) / 2;
     const p0: [number, number] = [a[0] + tx * s0, a[1] + tz * s0], p1: [number, number] = [p0[0] + tx * wdt, p0[1] + tz * wdt];
     const out = vera ? 3.0 : 1.7, yh = y + 3.0, yl = y + 2.55;
     const sn = [nx * 0.45, 0.89, nz * 0.45], sl = Math.hypot(sn[0], sn[1], sn[2]);

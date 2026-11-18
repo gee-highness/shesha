@@ -46,7 +46,7 @@ export class ExtrasBuilder {
     this.busShelters(); this.regSigns(); this.billboards(); this.typedSigns(); this.zebras(); this.furniture();
     this.speedSigns(scene);
     this.roundabouts(); this.footbridges(); this.animals();
-    this.viewpoints();
+    this.viewpoints(); this.mavusoArch(); this.marketsAndRanks(); this.boulders();
     this.flush();
   }
 
@@ -357,6 +357,83 @@ export class ExtrasBuilder {
       const b = this.buf(v.p[0], v.p[1], 'props');
       this.box(b, v.p[0], y, v.p[1], 0.25, 0.25, 22, 1, 0, [0.13, 0.83, 0.93]); // a tall cyan marker pole you can spot from the road
     }
+  }
+
+  // ------------------------------------------------------------------ markets and bus ranks
+  /** Manzini Market stalls (brick counters under green tin canopies, yellow umbrellas) and the long green-and-yellow bus rank shelters. */
+  private marketsAndRanks(): void {
+    const w = this.w, green = [0.1, 0.42, 0.24], yellow = [0.95, 0.78, 0.14], brick = [0.72, 0.4, 0.3], post = [0.16, 0.3, 0.2], neon = [0.13, 0.83, 0.93];
+    const free = (x: number, z: number): boolean => !w.roadAt(x, z) && !w.nearBuilding(x, z);
+    for (const p of w.meta.pois ?? []) {
+      if (p.k !== 'marketplace' && p.k !== 'bus_station') continue;
+      const [cx, cz] = p.p; const rd = w.nearestRoadSegment(cx, cz, 6); const tx = rd ? rd.tx : 1, tz = rd ? rd.tz : 0, nx = -tz, nz = tx;
+      const at = (a: number, s: number): [number, number] => [cx + tx * a + nx * s, cz + tz * a + nz * s];
+      if (p.k === 'marketplace') {
+        for (let i = -3; i <= 3; i++) for (let j = -2; j <= 2; j++) {
+          const [x, z] = at(i * 4.4, j * 5.6); if (!free(x, z) || !free(x + tx * 1.6, z + tz * 1.6) || !free(x - tx * 1.6, z - tz * 1.6)) continue;
+          const y = w.groundHeightAt(x, z) - 0.05, b = this.buf(x, z, 'props');
+          this.box(b, x, y, z, 3.0, 1.1, 0.9, tx, tz, brick);                                                   // brick counter
+          for (const [a, s] of [[-1.5, -1.2], [1.5, -1.2], [-1.5, 1.2], [1.5, 1.2]]) this.box(b, x + tx * a + nx * s, y, z + tz * a + nz * s, 0.1, 0.1, 2.5, tx, tz, post);
+          this.box(b, x, y + 2.5, z, 3.6, 3.0, 0.14, tx, tz, green);                                            // green tin canopy
+          this.box(b, x, y + 2.36, z, 3.62, 3.02, 0.06, tx, tz, neon);                                          // light-strip under the eave
+          w.collision.addCircle(x, z, 1.3);
+          if (((Math.sin(x * 12.9898 + z * 78.233) * 43758.5453) % 1 + 1) % 1 < 0.45) { const [ux, uz] = [x + nx * 2.8, z + nz * 2.8]; if (free(ux, uz)) { this.box(b, ux, y, uz, 0.07, 0.07, 2.1, tx, tz, [0.6, 0.6, 0.6]); this.box(b, ux, y + 2.0, uz, 2.0, 2.0, 0.12, 0.707, 0.707, yellow); } }   // traders' umbrella
+        }
+      } else {
+        for (let j = -1; j <= 1; j++) {
+          const [x, z] = at(0, j * 13); const y = w.groundHeightAt(x, z) - 0.05, b = this.buf(x, z, 'props'); let ok = 0;
+          for (let i = -3; i <= 3; i++) { const [px, pz] = at(i * 4.4, j * 13); if (!free(px, pz)) continue; ok++; this.box(b, px, y, pz, 0.22, 0.22, 3.6, tx, tz, post); w.collision.addCircle(px, pz, 0.2); }
+          if (ok < 4) continue;
+          this.box(b, x, y + 3.6, z, 28, 5.2, 0.18, tx, tz, green);                                             // long tin canopy
+          for (const s of [-2.65, 2.65]) { this.box(b, x + nx * s, y + 3.2, z + nz * s, 28, 0.1, 0.5, tx, tz, yellow); this.box(b, x + nx * s, y + 3.1, z + nz * s, 28, 0.12, 0.08, tx, tz, neon); }   // yellow fascia + light strip
+          this.box(b, x, y, z, 26, 0.5, 0.45, tx, tz, [0.7, 0.68, 0.62]);                                       // waiting bench plinth
+        }
+      }
+    }
+  }
+
+  // ------------------------------------------------------------------ granite boulders
+  /** Weathered granite boulders on the steep hillsides around the city (the koppies behind every Manzini skyline photo). */
+  private boulders(): void {
+    const w = this.w, [x0, x1, z0, z1] = w.meta.bounds as number[], hsh = (a: number, b: number): number => ((Math.sin(a * 12.9898 + b * 78.233) * 43758.5453) % 1 + 1) % 1;
+    const H = (x: number, z: number): number => w.calculateRawTerrainHeight(x, z), cells = new Map<string, number[]>(), C = 1200;
+    for (let gx = x0 + 100; gx < x1 - 100; gx += 55) for (let gz = z0 + 100; gz < z1 - 100; gz += 55) {
+      const x = gx + (hsh(gx, gz) - 0.5) * 50, z = gz + (hsh(gz, gx) - 0.5) * 50; if (hsh(x * 0.7, z * 1.3) > 0.6) continue;
+      const slope = Math.max(Math.abs(H(x + 14, z) - H(x - 14, z)), Math.abs(H(x, z + 14) - H(x, z - 14))) / 28; if (slope < 0.2) continue;
+      if (w.roadAt(x, z) || w.nearBuilding(x, z) || w.nearestRoadSegment(x, z, 3)?.dist! < 14) continue;
+      const k = `${Math.floor(x / C)},${Math.floor(z / C)}`; let l = cells.get(k); if (!l) { l = []; cells.set(k, l); } l.push(x, z);
+    }
+    const geo = new THREE.IcosahedronGeometry(1, 0), mat = new THREE.MeshStandardMaterial({ color: 0x9a9084, roughness: 0.95, flatShading: true });
+    const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler();
+    cells.forEach((l, key) => {
+      const im = new THREE.InstancedMesh(geo, mat, l.length / 2); im.name = 'boulders'; im.castShadow = true;
+      for (let i = 0; i < l.length; i += 2) { const x = l[i], z = l[i + 1], s = 1.6 + hsh(x, z) * 4.2; e.set(hsh(x, 1) * 3, hsh(z, 2) * 6, hsh(x, z + 3) * 3); q.setFromEuler(e);
+        m4.compose(new THREE.Vector3(x, H(x, z) + s * 0.25, z), q, new THREE.Vector3(s * (1 + hsh(z, x) * 0.6), s * 0.75, s)); im.setMatrixAt(i / 2, m4); w.collision.addCircle(x, z, s * 0.9); }
+      im.computeBoundingSphere(); const [ix, iz] = key.split(',').map(Number); w.landmarksGroup.add(im); w.registerChunk(im, (ix + 0.5) * C, (iz + 0.5) * C, C * 0.75, 1600);
+    });
+  }
+
+  // ------------------------------------------------------------------ Mavuso gateway
+  /** The blue / silver / red gateway arch over the Mavuso Trade Centre entrance road (Manzini's best-known landmark), with a light-strip edge. */
+  private mavusoArch(): void {
+    const w = this.w, X = -1079, Z = -727; if (X < w.meta.bounds[0] || X > w.meta.bounds[1]) return;
+    const ring = (r0: number, r1: number, a0: number, a1: number, depth: number, col: number, em = 0): THREE.Mesh => {
+      const s = new THREE.Shape(); s.absarc(0, 0, r1, a0, a1, false); s.absarc(0, 0, r0, a1, a0, true); s.closePath();
+      const g = new THREE.ExtrudeGeometry(s, { depth, bevelEnabled: false, curveSegments: 20 }); g.translate(0, 0, -depth / 2);
+      return new THREE.Mesh(g, new THREE.MeshStandardMaterial({ color: col, roughness: 0.45, metalness: 0.35, emissive: em ? col : 0, emissiveIntensity: em, flatShading: true }));
+    };
+    const grp = new THREE.Group(), PI = Math.PI;
+    grp.add(ring(11, 14, 0, PI, 2.4, 0x1f2fa8));                       // royal-blue arch
+    grp.add(ring(13.2, 14.6, PI * 0.31, PI * 0.69, 2.8, 0xc9ced6));    // brushed-silver crown
+    grp.add(ring(10.5, 11.2, PI * 0.2, PI * 0.8, 2.6, 0xb81d24));      // red inner band
+    grp.add(ring(14.6, 14.85, 0, PI, 0.5, 0x22d3ee, 2.2));             // light-strip edge
+    for (const sx of [-1, 1]) {
+      const foot = new THREE.Mesh(new THREE.BoxGeometry(4.2, 5, 3.4), new THREE.MeshStandardMaterial({ color: 0x9aa0a8, roughness: 0.6, metalness: 0.3, flatShading: true })); foot.position.set(sx * 12.5, 2.5, 0); grp.add(foot);
+      const plinth = new THREE.Mesh(new THREE.BoxGeometry(6, 2.2, 3), new THREE.MeshStandardMaterial({ color: 0x8f2f2a, roughness: 0.8, flatShading: true })); plinth.position.set(sx * 19, 1.1, 1.5); grp.add(plinth);   // brick statue plinths
+      w.collision.addCircle(X + sx * 12.5, Z, 2.4); w.collision.addCircle(X + sx * 19, Z + 1.5, 2.6);
+    }
+    grp.position.set(X, Math.min(w.groundHeightAt(X - 12.5, Z), w.groundHeightAt(X + 12.5, Z)) - 0.4, Z);
+    grp.traverse((o) => { o.castShadow = true; }); w.landmarksGroup.add(grp); w.registerChunk(grp, X, Z, 30, 1200);
   }
 
   // ------------------------------------------------------------------ emit

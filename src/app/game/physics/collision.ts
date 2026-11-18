@@ -107,11 +107,67 @@ export class CollisionWorld {
     return out;
   }
 
-  resolve(v: RaycastVehicle, dynamics: DynamicCollider[] = [], dt = 1 / 60): CollisionResult {
+  /** Nearest spot to (x,z) where a car of radius `rad` is clear of every solid (spiral search); falls back to the input. */
+  freeSpot(x: number, z: number, y: number, rad = 1.6): { x: number; z: number } {
+    const c = { nx: 0, nz: 0, pen: 0 };
+    const free = (px: number, pz: number) => {
+      const gx = Math.floor(px / this.CELL), gz = Math.floor(pz / this.CELL);
+      for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) {
+        const key = this.key(gx + a, gz + b);
+        for (const i of this.polyGrid.get(key) ?? []) { if (y > this.polyY[i * 2 + 1] + (this.polyRoof[i] ? -0.6 : 1.3) || y < this.polyY[i * 2] - 1.3) continue; if (this.polyContact(i, px, pz, rad, c)) return false; }
+        for (const i of this.circleGrid.get(key) ?? []) { if (y > this.circleY[i * 2 + 1] + 1.3 || y < this.circleY[i * 2] - 1.3) continue; if (Math.hypot(px - this.circles[i * 3], pz - this.circles[i * 3 + 1]) < rad + this.circles[i * 3 + 2]) return false; }
+      }
+      return true;
+    };
+    if (free(x, z)) return { x, z };
+    for (let r = 1.5; r <= 30; r += 1.5) for (let k = 0, n = Math.ceil(r * 2.4); k < n; k++) { const a = (k / n) * Math.PI * 2, px = x + Math.cos(a) * r, pz = z + Math.sin(a) * r; if (free(px, pz)) return { x: px, z: pz }; }
+    return { x, z };
+  }
+
+  /** True when the car's circle chain placed at (x,z,y) touches any solid or moving collider. */
+  private touching(x: number, z: number, y: number, fx: number, fz: number, rad: number, L: number, count: number, dynamics: DynamicCollider[]): boolean {
+    const c = { nx: 0, nz: 0, pen: 0 };
+    for (let k = 0; k < count; k++) {
+      const off = (k / (count - 1) - 0.5) * (L - 2 * rad), cx = x + fx * off, cz = z + fz * off;
+      const gx = Math.floor(cx / this.CELL), gz = Math.floor(cz / this.CELL);
+      for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) {
+        const key = this.key(gx + a, gz + b);
+        for (const i of this.polyGrid.get(key) ?? []) {
+          if (y > this.polyY[i * 2 + 1] + (this.polyRoof[i] ? -0.6 : 1.3) || y < this.polyY[i * 2] - 1.3) continue;
+          const bb = i * 4; if (cx < this.polyBox[bb] - rad || cx > this.polyBox[bb + 2] + rad || cz < this.polyBox[bb + 1] - rad || cz > this.polyBox[bb + 3] + rad) continue;
+          if (this.polyContact(i, cx, cz, rad, c)) return true;
+        }
+        for (const i of this.circleGrid.get(key) ?? []) {
+          if (y > this.circleY[i * 2 + 1] + 1.3 || y < this.circleY[i * 2] - 1.3) continue;
+          if (Math.hypot(cx - this.circles[i * 3], cz - this.circles[i * 3 + 1]) < rad + this.circles[i * 3 + 2]) return true;
+        }
+      }
+      for (const o of dynamics) if (Math.hypot(cx - o.x, cz - o.z) < rad + o.r) return true;
+    }
+    return false;
+  }
+
+  /**
+   * Resolve the car against statics and moving colliders. Call once per physics step, after integration.
+   * `prev` = where the car was before this step: the move is swept in <=0.3 m slices so a fast car can never skip through a thin wall or pole.
+   */
+  resolve(v: RaycastVehicle, dynamics: DynamicCollider[] = [], dt = 1 / 60, prev?: { x: number; y: number; z: number }): CollisionResult {
     const res: CollisionResult = { impactSpeed: 0, hitKind: 'none', hitId: -1 };
     const L = v.config.wheelBaseM + 1.45, rad = Math.max(0.9, v.config.trackWidthM * 0.52);
     const count = Math.max(3, Math.round(L / (rad * 1.2)));
     const fwd = CollisionWorld._fwd.set(0, 0, 1).applyQuaternion(v.quaternion);
+    if (prev) {
+      const dx = v.position.x - prev.x, dz = v.position.z - prev.z, dist = Math.hypot(dx, dz);
+      if (dist > 0.3 && dist < 40 && !this.touching(prev.x, prev.z, prev.y, fwd.x, fwd.z, rad, L, count, dynamics)) {
+        const n = Math.ceil(dist / 0.3);
+        for (let s = 1; s <= n; s++) {
+          const t = s / n;
+          if (this.touching(prev.x + dx * t, prev.z + dz * t, prev.y + (v.position.y - prev.y) * t, fwd.x, fwd.z, rad, L, count, dynamics)) {
+            const tb = s / n; v.position.x = prev.x + dx * tb; v.position.z = prev.z + dz * tb; break;   // stop at the first touching slice (<=0.3 m deep) so the solver below takes a proper impulse
+          }
+        }
+      }
+    }
     const m = v.config.massKg, Iy = (m * (L * L + (rad * 2) ** 2)) / 12;
     const c = { nx: 0, nz: 0, pen: 0 }; const py = v.position.y;
 
@@ -121,17 +177,17 @@ export class CollisionWorld {
       const corr = Math.max(0, pen - 0.005) * 0.7;
       v.position.x += nx * corr; v.position.z += nz * corr;
       // relative velocity at the contact
-      const vx = v.velocity.x - v.angularVelocity.y * rz - otherVx, vz = v.velocity.z + v.angularVelocity.y * rx - otherVz;
+      const vx = v.velocity.x + v.angularVelocity.y * rz - otherVx, vz = v.velocity.z - v.angularVelocity.y * rx - otherVz;   // v + w x r, w = (0, wy, 0)
       const vn = vx * nx + vz * nz;
       if (vn >= 0) return;
-      const rn = rx * nz - rz * nx; // r x n (y component)
+      const rn = rz * nx - rx * nz; // (r x n).y
       const invM = 1 / m + (otherMass > 0 ? 1 / otherMass : 0);
       const e = Math.max(0.03, 0.2 - 0.012 * -vn); // crashes absorb most energy; gentle bumps bounce a little
       const j = (-(1 + e) * vn) / (invM + (rn * rn) / Iy);
       v.velocity.x += (nx * j) / m; v.velocity.z += (nz * j) / m;
       v.angularVelocity.y += (rn * j) / Iy;
       // Coulomb friction along the surface
-      const tx = -nz, tz = nx, vt = vx * tx + vz * tz, rt = rx * tz - rz * tx;
+      const tx = -nz, tz = nx, vt = vx * tx + vz * tz, rt = rz * tx - rx * tz;
       const jt = Math.max(-0.35 * j, Math.min(0.35 * j, -vt / (invM + (rt * rt) / Iy)));
       v.velocity.x += (tx * jt) / m; v.velocity.z += (tz * jt) / m; v.angularVelocity.y += (rt * jt) / Iy;
       if (-vn > res.impactSpeed) { res.impactSpeed = -vn; res.hitKind = kind; res.hitId = id; }

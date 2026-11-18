@@ -3,7 +3,7 @@ import { MatIconModule } from '@angular/material/icon';
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { AssetLibrary } from '../../game/graphics/asset-library';
-import { CAR_CATALOG, CAR_CLASSES, CarClass, CarDef, carConfig } from '../../game/cars';
+import { CAR_CATALOG, DEFAULT_CAR, CAR_CLASSES, CarClass, CarDef, carConfig } from '../../game/cars';
 import { TuningService } from '../../services/tuning.service';
 
 @Component({
@@ -68,7 +68,7 @@ import { TuningService } from '../../services/tuning.service';
   `
 })
 export class CarSelectComponent implements AfterViewInit, OnDestroy {
-  current = input<string>('ferrari');
+  current = input<string>('race');
   choose = output<CarDef>();
   closeModal = output<void>();
   @ViewChild('view', { static: true }) viewRef!: ElementRef<HTMLCanvasElement>;
@@ -76,7 +76,7 @@ export class CarSelectComponent implements AfterViewInit, OnDestroy {
 
   readonly classes = CAR_CLASSES;
   readonly cls = signal<CarClass | null>(null);
-  readonly sel = signal<CarDef>(CAR_CATALOG[0]);
+  readonly sel = signal<CarDef>(DEFAULT_CAR);
   readonly filtered = computed(() => CAR_CATALOG.filter((c) => !this.cls() || c.cls === this.cls()));
   readonly stats = computed(() => {
     const a = carConfig(this.sel());

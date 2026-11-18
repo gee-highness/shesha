@@ -19,7 +19,8 @@ export class RaycastVehicle {
   public reverse = false;
   /** Driving assists (Forza-style defaults): counter-steer help when the rear steps out. 0 = off .. 1 = strong. */
   public stabilityAssist = 0.6;
-  private shiftTimer = 0;          // torque is cut while a gear change completes
+  private shiftTimer = 0;
+  private flipT = 0;          // torque is cut while a gear change completes
   private _latF = [0, 0, 0, 0];    // tyre lateral force with relaxation (tyres do not react instantly)
   public currentRpm = 900;
   public engineLoad = 0;
@@ -120,6 +121,12 @@ export class RaycastVehicle {
    * Fixed-step physics update.
    */
   public updatePhysics(dt: number, groundQuery: (x: number, z: number, y?: number) => { height: number; normal: THREE.Vector3; surfaceClass: number; surfaceName?: string }, terrainHeight?: (x: number, z: number) => number): void {
+    // 120 Hz inner sub-steps: stiff springs, tyre forces and ground contacts integrate far more accurately than at the 60 Hz frame step
+    const n = dt > 1 / 100 ? 2 : 1;
+    for (let i = 0; i < n; i++) this.step(dt / n, groundQuery, terrainHeight);
+  }
+
+  private step(dt: number, groundQuery: (x: number, z: number, y?: number) => { height: number; normal: THREE.Vector3; surfaceClass: number; surfaceName?: string }, terrainHeight?: (x: number, z: number) => number): void {
     this._forward.set(0, 0, 1).applyQuaternion(this.quaternion);
     this._up.set(0, 1, 0).applyQuaternion(this.quaternion);
     this._right.set(1, 0, 0).applyQuaternion(this.quaternion);
@@ -147,7 +154,7 @@ export class RaycastVehicle {
       const restLength = this.config.suspensionRestLengthM;
       const rayDist = wheelPos.y - ground.height;
 
-      const isContact = rayDist <= restLength && rayDist > -0.5;
+      const isContact = rayDist <= restLength && rayDist > -0.5 && this._up.y > 0.15;   // a car on its side or roof has no wheels on the ground
       w.surfaceClass = ground.surfaceClass;
       if (ground.surfaceName) w.surfaceName = ground.surfaceName;
 
@@ -184,6 +191,7 @@ export class RaycastVehicle {
         const patchOffset = this._po.copy(offsetWorld); patchOffset.y = ground.height - this.position.y;
         this.computeTireForces(w, i, speedMs, normalForce, ground, dt, netForce, totalTorque, patchOffset);
       } else {
+        this.spinFree(w, i, dt);
         w.compressionM = 0;
         w.verticalLoadN = 0;
         w.lateralForceN = 0;
@@ -229,8 +237,8 @@ export class RaycastVehicle {
       this.activeAeroAngleDeg = Math.max(10, this.activeAeroAngleDeg - dt * 40); // Cruising mode
     }
 
-    const aeroDragN = dynPressure * this.config.dragCoefficient * 2.2;
-    netForce.addScaledVector(this._forward, -Math.sign(speedMs) * aeroDragN);
+    { const vMag = this.velocity.length(); if (vMag > 0.1) { const side = Math.abs(this.velocity.dot(this._right)) / vMag;   // sideways the car shows ~2x the frontal area
+      const drag = 0.5 * 1.225 * vMag * vMag * this.config.dragCoefficient * 2.2 * (1 + side * 1.4); netForce.addScaledVector(this.velocity, -drag / vMag); } }
 
     // 4. Engine & Transmission updates
     this.updatePowertrain(dt, speedMs);
@@ -251,7 +259,7 @@ export class RaycastVehicle {
       (tb.z - (Iy - Ix) * wb.x * wb.y) / Iz
     );
     this.angularVelocity.addScaledVector(ab.applyQuaternion(this.quaternion), dt);
-    this.angularVelocity.multiplyScalar(Math.pow(0.985, dt * 60)); // small structural damping only
+    this.angularVelocity.multiplyScalar(Math.pow(groundedWheels ? 0.992 : 0.998, dt * 60)); // structural / air damping only: the tyres do the real work
 
     // Parking sleep: a stationary car must not creep or jitter
     if (groundedWheels >= 3 && this.throttle === 0 && Math.hypot(this.velocity.x, this.velocity.z) < 0.5) {
@@ -273,12 +281,16 @@ export class RaycastVehicle {
     this.enforceGround(groundQuery, terrainHeight);
 
     // Keep car upright stabilization if flipped
-    const roll = this._up.y;
-    if (roll < 0.3) {
-      // Auto righting assist
-      const rightingTorque = new THREE.Vector3(0, 1, 0).cross(this._up).multiplyScalar(-dt * 4);
-      this.quaternion.multiply(new THREE.Quaternion().setFromEuler(new THREE.Euler(rightingTorque.x, 0, rightingTorque.z)));
-    }
+    // Self-righting: only a car lying on its side / roof and nearly stopped gets a gentle roll torque back onto its wheels (never mid-jump)
+    this._up.set(0, 1, 0).applyQuaternion(this.quaternion);
+    if (this._up.y < 0.35 && groundedWheels < 2 && this.velocity.lengthSq() < 9) {
+      this.flipT += dt;
+      if (this.flipT > 0.8) {
+        const ax = this._ax.set(0, 1, 0).cross(this._up); const s = ax.length();
+        if (s < 1e-3) ax.copy(this._forward); else ax.divideScalar(s);   // fully on the roof: roll about the long axis
+        this.angularVelocity.addScaledVector(ax, -dt * 7); this.velocity.y += dt * 6;
+      }
+    } else this.flipT = 0;
 
     // Compute G-forces
     this.gForceLateral = -linearAccel.dot(this._right) / 9.81;
@@ -349,6 +361,11 @@ export class RaycastVehicle {
         if (Math.abs(beta) > 0.07) steerCmd += (Math.abs(this.steerInput) > 0.6 && Math.sign(this.steerInput) === Math.sign(help) ? 0 : help) * THREE.MathUtils.clamp((Math.abs(beta) - 0.07) * 8, 0, 1);
       }
       steerRad = -THREE.MathUtils.clamp(steerCmd, -1.15, 1.15) * THREE.MathUtils.degToRad(lockDeg);
+      if (Math.abs(steerRad) > 1e-3) {   // Ackermann: both front wheels aim at the same turn centre (inner wheel steers more)
+        const Lb = this.config.wheelBaseM, R = Lb / Math.tan(Math.abs(steerRad)), half = this.config.trackWidthM / 2;
+        const inner = (steerRad < 0) === (wheelIndex === 0);   // steerRad < 0 turns the nose toward local -x, where wheel 0 sits: it is the inside wheel
+        steerRad = Math.sign(steerRad) * Math.atan(Lb / (R + (inner ? -half : half)));
+      }
     }
 
     const wheelRot = this._qw.copy(this.quaternion).multiply(this._qs.setFromAxisAngle(RaycastVehicle.Y, steerRad));
@@ -379,29 +396,23 @@ export class RaycastVehicle {
     const D = normalForceN * effectivePeakGrip;
     const E = -0.6;
 
-    // Drive torque & braking (longitudinal) first, so the lateral force sees the friction circle
-    let longForceN = 0;
+    // ---- Longitudinal: every wheel spins on its own. Its slip ratio sets the tyre force (wheelspin, lock-up, ABS, traction control),
+    // and the wheel is integrated semi-implicitly (linearised tyre stiffness) so it stays stable at the 120 Hz step.
     const tractionLimit = normalForceN * effectivePeakGrip;
-    if (w.isDriven && this.throttle > 0 && this.shiftTimer <= 0 && this.currentRpm < this.config.engineMaxRpm * 0.985) {
-      const driveFraction = this.config.driveType === 'AWD' ? 0.25 : 0.5;
-      const engineTorque = this.calculateEngineTorque(this.currentRpm) * this.throttle;
-      const gearRatio = this.tuning.gearRatios[this.currentGear - 1] * this.tuning.finalDriveRatio;
-      const wheelDriveForce = (engineTorque * gearRatio * 0.9 /* driveline efficiency */) / 0.33 * driveFraction;
-      // Locking diff keeps power on the grippy wheel
-      longForceN = Math.min(wheelDriveForce, tractionLimit * (0.92 + (this.tuning.diffAccelLockPct / 100) * 0.2));
-      if (this.reverse) longForceN = -longForceN * 0.8 * Math.max(0, 1 - Math.max(0, -vLong) / 9);   // reverse: gentler, tops out near 30 km/h
-    }
-
-    if (this.brake > 0) {
-      // Bias is per axle, so double it for the per-wheel share; the tyre can never give more than mu * N
-      const brakeBias = 2 * (wheelIndex < 2 ? this.tuning.brakeBiasFrontPct / 100 : (100 - this.tuning.brakeBiasFrontPct) / 100);
-      const brakeForceN = Math.min(tractionLimit * 1.12, this.brake * (this.tuning.brakePressurePct / 100) * brakeBias * tractionLimit * 1.15);   // peak longitudinal grip sits above lateral; pedal modulates up to it (ABS-like: never beyond)
-      longForceN -= Math.sign(vLong) * Math.min(Math.abs(vLong * this.config.massKg * 0.25), brakeForceN);
-
-      // Heating brake rotors
-      w.rotorTemperatureC += this.brake * (normalForceN / 2000) * dt * 90;
-      if (w.rotorTemperatureC > 850) w.rotorTemperatureC = 850;
-    }
+    const R = RaycastVehicle.WHEEL_R, Iw = w.isDriven ? 1.7 : 1.1, Dx = tractionLimit * 1.05, vRef = Math.max(3, Math.abs(vLong));
+    const fx = (om: number): number => { const k = (om * R - vLong) / vRef, bk = 11 * k; return Dx * Math.sin(1.65 * Math.atan(bk - 0.35 * (bk - Math.atan(bk)))); };
+    const slip0 = (w.angularVelocityRadS * R - vLong) / vRef;
+    let Td = this.driveTorque(w), Tb = this.brakeTorque(w, wheelIndex);
+    { const tcAt = this.stabilityAssist >= 0.5 ? 0.1 : 0.3; if (Td * slip0 > 0) Td *= THREE.MathUtils.clamp(1 - (Math.abs(slip0) - tcAt) * 6, 0.2, 1); }   // traction control (looser on drift cars)
+    if (Tb > 0 && Math.abs(vLong) > 2 && !(this.handbrake && wheelIndex >= 2)) Tb *= THREE.MathUtils.clamp(1 - (-slip0 * Math.sign(vLong) - 0.1) * 6, 0.25, 1);   // ABS: eases off past peak slip; cuts out at walking pace like the real thing
+    const f0 = fx(w.angularVelocityRadS), kd = Math.max(0, (fx(w.angularVelocityRadS + 0.25) - fx(w.angularVelocityRadS - 0.25)) / 0.5), damp = 1 + (dt * R * kd) / Iw;
+    let om = w.angularVelocityRadS + ((dt / Iw) * (Td - R * f0)) / damp;
+    if (Tb > 0) { const dOm = ((dt / Iw) * Tb) / damp; om = Math.abs(om) <= dOm ? 0 : om - Math.sign(om) * dOm; }        // brake friction: can stop the wheel, never reverse it
+    w.angularVelocityRadS = om;
+    let longForceN = fx(om);
+    w.slipRatioPct = Math.round(((om * R - vLong) / vRef) * 100);
+    w.isLocked = om === 0 && Math.abs(vLong) > 1;
+    if (this.brake > 0) { w.rotorTemperatureC = Math.min(850, w.rotorTemperatureC + this.brake * (normalForceN / 2000) * dt * 90); }
 
     // Rolling resistance (worse on soft ground) + engine braking when off throttle
     const crr = this.getRollingResistance(ground.surfaceClass);
@@ -412,11 +423,7 @@ export class RaycastVehicle {
     let latForceMagnitude = D * Math.sin(C * Math.atan(B * slipAngle - E * (B * slipAngle - Math.atan(B * slipAngle)))) * Math.sqrt(Math.max(0.04, 1 - usage * usage));
 
     // Handbrake drops rear lateral grip for drift initiation
-    if (this.handbrake && wheelIndex >= 2) {
-      latForceMagnitude *= 0.35;
-      w.isLocked = true;
-      w.isSkidding = true;
-    }
+    if (this.handbrake && wheelIndex >= 2) { latForceMagnitude *= 0.6; w.isSkidding = true; }   // locked rears: the friction circle does the rest
 
     { const speedAbs = Math.max(1.5, Math.abs(speedMs)), k = Math.min(1, dt * speedAbs / 0.32);                // tyre relaxation length ~0.32 m: removes the digital snap
       this._latF[wheelIndex] += (latForceMagnitude - this._latF[wheelIndex]) * Math.max(0.18, k); latForceMagnitude = this._latF[wheelIndex]; }
@@ -431,10 +438,33 @@ export class RaycastVehicle {
     totalTorque.add(this._ta.copy(offsetWorld).cross(longForceVec));
 
     // Skid detection & tire heat
-    w.isSkidding = w.slipAngleDeg > 12 || Math.abs(longForceN) > normalForceN * 0.95;
+    w.isSkidding = w.slipAngleDeg > 12 || Math.abs(w.slipRatioPct) > 20;
     if (w.isSkidding) {
       w.temperatureC = Math.min(145, w.temperatureC + dt * 18);
     }
+  }
+
+  static readonly WHEEL_R = 0.33;
+  /** Engine torque delivered to one wheel (Nm, signed; negative in reverse). */
+  private driveTorque(w: WheelState): number {
+    if (!w.isDriven || this.throttle <= 0 || this.shiftTimer > 0 || this.currentRpm >= this.config.engineMaxRpm * 0.985) return 0;
+    const share = this.config.driveType === 'AWD' ? 0.25 : 0.5;
+    const t = this.calculateEngineTorque(this.currentRpm) * this.throttle * this.tuning.gearRatios[this.currentGear - 1] * this.tuning.finalDriveRatio * 0.9 * share;
+    return this.reverse ? -t * 0.8 * Math.max(0, 1 - Math.max(0, -w.angularVelocityRadS * RaycastVehicle.WHEEL_R) / 9) : t;
+  }
+  /** Brake (and handbrake) torque at one wheel, Nm (always >= 0). */
+  private brakeTorque(w: WheelState, i: number): number {
+    const fz = (this.config.massKg * 9.81) / 4, R = RaycastVehicle.WHEEL_R;
+    let t = 0;
+    if (this.brake > 0) { const bias = 2 * (i < 2 ? this.tuning.brakeBiasFrontPct / 100 : (100 - this.tuning.brakeBiasFrontPct) / 100); t = this.brake * (this.tuning.brakePressurePct / 100) * bias * fz * 1.5 * R * this.config.tireGripPeak; }
+    if (this.handbrake && i >= 2) t = Math.max(t, fz * 4 * R);
+    return t;
+  }
+  /** A wheel off the ground: engine and brakes still act on it, nothing holds it back but a little bearing drag. */
+  private spinFree(w: WheelState, i: number, dt: number): void {
+    const Iw = w.isDriven ? 1.7 : 1.1; let om = w.angularVelocityRadS + (dt / Iw) * this.driveTorque(w);
+    const Tb = this.brakeTorque(w, i), dOm = (dt / Iw) * Tb; om = Math.abs(om) <= dOm ? 0 : om - Math.sign(om) * dOm;
+    w.angularVelocityRadS = om * (1 - 0.3 * dt);
   }
 
   private updatePowertrain(dt: number, speedMs: number): void {
@@ -442,7 +472,9 @@ export class RaycastVehicle {
     const currentGearRatio = this.tuning.gearRatios[this.currentGear - 1] * this.tuning.finalDriveRatio;
 
     // RPM calculated from road speed with engine clutch slip
-    const roadRpm = ((Math.abs(speedMs) / (2 * Math.PI * wheelRadiusM)) * 60) * currentGearRatio;
+    let om = 0, n = 0; for (const w of this.wheels) if (w.isDriven) { om += Math.abs(w.angularVelocityRadS); n++; }
+    const wheelSpeed = n ? (om / n) * RaycastVehicle.WHEEL_R : Math.abs(speedMs);               // driven wheels, so wheelspin flares the revs
+    const roadRpm = ((wheelSpeed / (2 * Math.PI * wheelRadiusM)) * 60) * currentGearRatio;
     const targetRpm = Math.max(this.config.engineIdleRpm, Math.min(this.config.engineMaxRpm, roadRpm + this.throttle * 900));
 
     this.currentRpm = THREE.MathUtils.damp(this.currentRpm, targetRpm, 14, dt);

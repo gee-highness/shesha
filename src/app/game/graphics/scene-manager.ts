@@ -33,8 +33,10 @@ function applyStyleGrade(): void {
 }
 import { AssetLibrary } from './asset-library';
 import { RoadTraffic } from './road-traffic';
-import { CAR_CATALOG, CarDef } from '../cars';
+import { CAR_CATALOG, DEFAULT_CAR, CarDef } from '../cars';
 import { RemotePlayers } from './remote-players';
+import { NavMarkers } from './nav-markers';
+import type { Route } from '../road-graph';
 import type { PeerState } from '../../services/multiplayer.service';
 import { CarFactory } from './car-factory';
 import { RaycastVehicle } from '../physics/raycast-vehicle';
@@ -54,7 +56,6 @@ export class SceneManager {
   public vehicleMeshGroup!: THREE.Group;
   private modelWheels: THREE.Object3D[] = [];
   private modelTail: THREE.MeshStandardMaterial | null = null;
-  private modelSpin = 0;
   private modelSpinSign = 1;
   private modelHolder: THREE.Group | null = null;
   private modelWheelCy = 0.33;
@@ -185,7 +186,7 @@ export class SceneManager {
     this.makeHills();
   }
 
-  public spawnVehicle(config: VehicleArchetypeConfig, visuals: VisualCustomization, def: CarDef = CAR_CATALOG[0]): void {
+  public spawnVehicle(config: VehicleArchetypeConfig, visuals: VisualCustomization, def: CarDef = DEFAULT_CAR): void {
     if (this.vehicleMeshGroup) {
       this.scene.remove(this.vehicleMeshGroup);
     }
@@ -227,6 +228,11 @@ export class SceneManager {
 
   // ---- map waypoint beacon: a tall magenta light shaft
   private beacon?: THREE.Mesh;
+  private navMarkers?: NavMarkers;
+  /** Sat-nav in the world: route chevrons on the road, destination beam + label, next-turn marker. */
+  public setNav(wp: [number, number] | null, route: Route | null, idx: number, car: THREE.Vector3, dt: number): void {
+    (this.navMarkers ??= new NavMarkers(this.scene, (x, z, y) => this.worldBuilder.groundHeightAt(x, z, y))).update(wp, route, idx, car, dt);
+  }
   public setWaypoint(wp: [number, number] | null): void {
     if (!wp) { if (this.beacon) this.beacon.visible = false; return; }
     if (!this.beacon) {
@@ -240,9 +246,9 @@ export class SceneManager {
   public setTheme(t: 'REAL' | 'NEO'): void {
     this.neo = t === 'NEO';
     const wb = this.worldBuilder, mark = wb.markMat, asph = wb.asphMat;
-    if (mark) { mark.emissive.setRGB(0.1, 0.9, 1.0); mark.emissiveMap = this.neo ? mark.map : null; mark.emissiveIntensity = this.neo ? 1.6 : 0; mark.needsUpdate = true; }
+    if (mark) { mark.emissive.setRGB(0.1, 0.9, 1.0); mark.emissiveMap = this.neo ? mark.map : null; mark.emissiveIntensity = this.neo ? 0.55 : 0; mark.needsUpdate = true; }
     if (asph) { asph.color.setScalar(this.neo ? 0.55 : 1); asph.needsUpdate = true; }
-    this.hemiLight.color.set(this.neo ? 0x8a6bff : 0xbae6fd); this.hemiLight.groundColor.set(this.neo ? 0x1a0b3a : 0x854d0e);
+    this.hemiLight.color.set(this.neo ? 0xa9c8ff : 0xbae6fd); this.hemiLight.groundColor.set(this.neo ? 0x4a3024 : 0x854d0e);
     if (!this.neo && wb.city) wb.city.neo.value = 0;
   }
 
@@ -276,11 +282,11 @@ export class SceneManager {
     const gloomK = env.weather === 'TROPICAL_RAIN' ? 0.18 : env.weather === 'OVERCAST' ? 0.45 : env.weather === 'MIST' ? 0.55 : 1;
     this.skyGloom = 1 - gloomK; this.skyCover = env.weather === 'SUNNY' ? 0.5 : env.weather === 'MIST' ? 0.7 : 0.95;
     const pal = skyPalette(sd.y, gloomK, this.neo, this.pal);
-    const day = pal.day * (this.neo ? 0.75 : 1);
+    const day = pal.day * (this.neo ? 0.92 : 1);
     const gloom = 0.45 + 0.55 * gloomK;
     // sun: warm key from the palette; shadows from it only when it is above the horizon
     this.sunLight.position.set(sd.x * 400, Math.max(40, sd.y * 400), sd.z * 400);
-    this.sunLight.color.copy(pal.sun); this.sunLight.intensity = pal.sunI * (sd.y > -0.02 ? 1 : 0) * gloom * gloom * (this.neo ? 0.6 : 1);
+    this.sunLight.color.copy(pal.sun); this.sunLight.intensity = pal.sunI * (sd.y > -0.02 ? 1 : 0) * gloom * gloom * (this.neo ? 0.88 : 1);
     // ambient: sky colour above, warm bounce below; cool rim light opposite the sun for the stylised edge glow
     this.hemiLight.color.copy(pal.zenith).lerp(new THREE.Color(1, 1, 1), 0.82);   // skylight is nearly white: walls must not turn blue this.hemiLight.groundColor.copy(pal.horizon).multiplyScalar(0.42).lerp(new THREE.Color(0.35, 0.26, 0.2), 0.3);
     const dark = Math.pow(day, 1.4); this.hemiLight.intensity = 0.045 + 0.85 * dark;                 // nights are properly dark: only faint moonlight
@@ -304,6 +310,7 @@ export class SceneManager {
     }
   }
 
+  private modelSpins = [0, 0, 0, 0];
   public syncVehicleVisuals(vehicle: RaycastVehicle, dt: number): void {
     if (!this.vehicleMeshGroup || !this.vehicleParts) return;
 
@@ -389,12 +396,11 @@ export class SceneManager {
       this.modelHolder.position.y = (gy + this.modelRadius - vehicle.position.y) - this.modelWheelCy;
     }
 
-    // 2b. Real Ferrari wheels: steer (front) + roll
+    // 2b. Model wheels: steer (front) + roll
     if (this.modelWheels.length === 4) {
-      const fwd = vehicle.velocity.dot(this.fwdS.set(0, 0, 1).applyQuaternion(vehicle.quaternion));
-      this.modelSpin += this.modelSpinSign * (fwd / this.modelRadius) * dt;
       this.modelWheels.forEach((w, i) => {
-        w.rotation.x = this.modelSpin;
+        this.modelSpins[i] += this.modelSpinSign * ((vehicle.wheels[i].angularVelocityRadS * 0.33) / this.modelRadius) * dt;   // each wheel's own spin: burnouts and lock-ups show
+        w.rotation.x = this.modelSpins[i];
         w.rotation.y = i < 2 ? -vehicle.steerInput * THREE.MathUtils.degToRad(30) : 0;
       });
     }
@@ -425,7 +431,7 @@ export class SceneManager {
     const out: Record<string, number> = {};
     this.scene.traverseVisible((o) => {
       const m = o as THREE.Mesh; if (!m.isMesh) return; const g = m.geometry; const t = (g.index ? g.index.count : g.attributes['position'].count) / 3 * ((o as THREE.InstancedMesh).count ?? 1);
-      const k = o.name || (m.material as THREE.Material).type + ':' + ((m.material as THREE.MeshStandardMaterial).map ? 'tex' : 'plain'); out[k] = (out[k] ?? 0) + t; out['calls:' + k] = (out['calls:' + k] ?? 0) + 1;
+      const mm = (Array.isArray(m.material) ? m.material[0] : m.material) as THREE.MeshStandardMaterial, k = o.name || mm.type + ':' + (mm.map ? 'tex' : 'plain'); out[k] = (out[k] ?? 0) + t; out['calls:' + k] = (out['calls:' + k] ?? 0) + 1;
     });
     return out;
   }

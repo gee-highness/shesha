@@ -27,10 +27,10 @@ interface Racer {
 }
 const STEP = 5, CP = 300, VMAX = 62, ALAT = 8.2, BRAKE = 7.5;
 const FIELD: { name: string; kind: CarKind; col: number[]; stripe: number[]; top: number; acc: number; skill: number }[] = [
-  { name: 'Thandi', kind: 'sedan', col: [0.05, 0.22, 0.75], stripe: [1, 1, 1], top: 57, acc: 6.6, skill: 1.0 },
-  { name: 'Nomsa', kind: 'sedan', col: [0.05, 0.5, 0.2], stripe: [1, 0.85, 0.1], top: 55, acc: 6.4, skill: 0.97 },
-  { name: 'Sipho', kind: 'hatch', col: [0.8, 0.05, 0.05], stripe: [1, 1, 1], top: 53, acc: 6.2, skill: 0.94 },
-  { name: 'Mandla', kind: 'hatch', col: [0.95, 0.72, 0.05], stripe: [0.05, 0.05, 0.05], top: 51, acc: 5.9, skill: 0.9 },
+  { name: 'Thandi', kind: 'sport', col: [0.05, 0.22, 0.75], stripe: [1, 1, 1], top: 57, acc: 6.6, skill: 1.0 },
+  { name: 'Nomsa', kind: 'gt', col: [0.05, 0.5, 0.2], stripe: [1, 0.85, 0.1], top: 55, acc: 6.4, skill: 0.97 },
+  { name: 'Sipho', kind: 'hothatch', col: [0.8, 0.05, 0.05], stripe: [1, 1, 1], top: 53, acc: 6.2, skill: 0.94 },
+  { name: 'Mandla', kind: 'coupe', col: [0.95, 0.72, 0.05], stripe: [0.05, 0.05, 0.05], top: 51, acc: 5.9, skill: 0.9 },
 ];
 
 /**

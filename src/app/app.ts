@@ -35,7 +35,8 @@ import { RaycastVehicle } from './game/physics/raycast-vehicle';
 
 // Components
 import { CarSelectComponent } from './components/car-select/car-select.component';
-import { CAR_CATALOG, CarDef, carConfig } from './game/cars';
+import { CAR_CATALOG, DEFAULT_CAR, CarDef, carConfig } from './game/cars';
+import { ControllerSetupComponent } from './components/controller-setup/controller-setup.component';
 import { MultiplayerComponent } from './components/multiplayer/multiplayer.component';
 import { MultiplayerService, FLAG } from './services/multiplayer.service';
 import { IntroComponent } from './components/intro/intro.component';
@@ -49,7 +50,7 @@ import { TouchControlsComponent } from './components/touch-controls/touch-contro
 
 @Component({
   selector: 'app-root',
-  imports: [MultiplayerComponent, HelpComponent, 
+  imports: [ControllerSetupComponent, MultiplayerComponent, HelpComponent, 
     CommonModule,
     MatIconModule,
     HudComponent,
@@ -101,7 +102,8 @@ export class App implements AfterViewInit, OnDestroy {
   readonly isPhotoMode = signal<boolean>(false);
   readonly started = signal<boolean>(false);
   readonly showCars = signal<boolean>(false);
-  readonly currentCar = signal<CarDef>(CAR_CATALOG[0]);
+  readonly showPadSetup = signal<boolean>(false);
+  readonly currentCar = signal<CarDef>(DEFAULT_CAR);
 
   public onChooseCar(def: CarDef): void {
     this.currentCar.set(def);
@@ -116,7 +118,7 @@ export class App implements AfterViewInit, OnDestroy {
     this.sceneManager.spawnVehicle(config, this.tuningService.visuals(), def);
     this.showCars.set(false);
   }
-  public begin(): void { this.audioService.unlockAudio(); this.started.set(true); }
+  public begin(): void { this.audioService.unlockAudio(); this.started.set(true); this.watchInput(); try { window.focus(); } catch { /* embedded preview */ } }
   readonly showTouchControls = signal<boolean>(false);
 
   // Core Game Loop & Physics
@@ -179,7 +181,7 @@ export class App implements AfterViewInit, OnDestroy {
       // Drop the car on the real MR3 (Ngwane St, eastbound) once the world has streamed in
       (window as unknown as { __shesha: Record<string, unknown> }).__shesha = {
         ...((window as unknown as { __shesha?: Record<string, unknown> }).__shesha ?? {}),
-        roadCut: () => this.sceneManager.worldBuilder.collision.cut, roadFix: () => this.sceneManager.worldBuilder.roadFix, wb: this.sceneManager.worldBuilder, veh: this.vehicle, nav: this.nav, env: this.envService, drive: this.drive, race: () => this.sceneManager.race, raceSvc: this.raceSvc,
+        roadCut: () => this.sceneManager.worldBuilder.collision.cut, roadFix: () => this.sceneManager.worldBuilder.roadFix, wb: this.sceneManager.worldBuilder, veh: this.vehicle, scene: this.sceneManager.scene, nav: this.nav, env: this.envService, drive: this.drive, race: () => this.sceneManager.race, raceSvc: this.raceSvc,
         perf: () => Object.fromEntries(Object.entries(this.perf).map(([k, v]) => [k, Math.round(v * 100) / 100])),
         tpRoad: (x: number, z: number) => {
           const wb = this.sceneManager.worldBuilder; const r = wb.nearestRoadSegment(x, z, 5); if (!r) return null;
@@ -325,10 +327,11 @@ export class App implements AfterViewInit, OnDestroy {
       // Update Camera & Visuals
       const pad = this.pad;
       this.sceneManager.cameraRig.look(pad.lookX + this.mlx, pad.lookY + this.mly, frameDelta); this.mlx = this.mly = 0;
-      this.sceneManager.setWaypoint(this.nav.waypoint());
+      this.sceneManager.setNav(this.nav.waypoint(), this.nav.route(), this.nav.progress, this.vehicle.position, frameDelta);
       this.drive.tick(frameDelta, this.vehicle.steerInput);
       this.audioService.setHorn(this.drive.horn());
       this.sceneManager.setLights(this.drive.headlights(), this.drive.leftOn, this.drive.rightOn, this.vehicle.brake > 0.15 || this.vehicle.handbrake, false, this.nightFactor);
+      this.drive.impact.update((v) => (v > 0.01 ? v * Math.exp(-3.2 * frameDelta) : 0));
       this.sceneManager.cameraRig.update(
         frameDelta,
         this.vehicle.position,
@@ -336,6 +339,7 @@ export class App implements AfterViewInit, OnDestroy {
         telem.speedKmh,
         pad.lookBack
       );
+      this.sceneManager.cameraRig.applyShake(frameDelta);
       tp = this.mark('camera', tp);
       this.sceneManager.syncVehicleVisuals(this.vehicle, frameDelta);
       if (this.mp.status() === 'online') {
@@ -367,7 +371,7 @@ export class App implements AfterViewInit, OnDestroy {
 
     // Render Scene
     tp = this.mark('hud+misc', tp);
-    if (this.hudComponent?.showFps() && now - this.fpsT > 500) { this.fpsT = now; const sm = this.sceneManager; this.hudComponent.fpsText.set(`${sm.fps} fps · ${Math.round(sm.resolution * 100)}% res · ${Math.round((this.perf['physics'] ?? 0) * 10) / 10}ms phys`); }
+    if (this.hudComponent?.showFps() && now - this.fpsT > 500) { this.fpsT = now; const sm = this.sceneManager; this.hudComponent.fpsText.set(`${sm.fps} fps · ${Math.round(sm.resolution * 100)}% res · ${Math.round((this.perf['physics'] ?? 0) * 10) / 10}ms phys\ninput: ${this.pad.connected ? 'pad ' + this.gamepadService.controllerName().slice(0, 28) + ` steer ${this.pad.steer.toFixed(2)} thr ${this.pad.throttle.toFixed(2)} brk ${this.pad.brake.toFixed(2)}` : 'no pad'} | keys ${this.keyThrottle ? 'W' : '-'}${this.keyBrake ? 'S' : '-'}${this.keySteerLeft ? 'A' : '-'}${this.keySteerRight ? 'D' : '-'} | car ${this.vehicle.throttle.toFixed(2)}/${this.vehicle.brake.toFixed(2)} ${Math.round(this.vehicle.velocity.length() * 3.6)} km/h`); }
     this.sceneManager.render(frameDelta * 1000);
     this.mark('render(cpu submit)', tp);
 
@@ -404,6 +408,12 @@ export class App implements AfterViewInit, OnDestroy {
     if (pad.worldTools) this.showPipeline.update((v) => !v);
     if (pad.toggleHelp) this.showHelp.update((v) => !v);
   }
+  /** If nothing at all (key, pad, touch) is received 15 s after starting, say how to get control. */
+  private watchInput(): void {
+    let seen = false; const on = () => { seen = true; };
+    window.addEventListener('keydown', on, { once: true }); window.addEventListener('pointerdown', on, { once: true });
+    setTimeout(() => { if (!seen && !this.pad.connected) this.raceSvc.flash('No input yet: click the game, then use W A S D / arrows or a controller. F2 = controller setup, F = input readout.', 9000); }, 15000);
+  }
   private keyHorn = false; private fwdS = new THREE.Vector3();
 
   private stepPhysics(dt: number): void {
@@ -415,13 +425,14 @@ export class App implements AfterViewInit, OnDestroy {
     let brake = 0;
     let handbrake = false;
 
-    if (pad.connected) {
+    // Controller wins while it is being used; an idle or phantom pad no longer locks out touch / keyboard
+    const padActive = pad.connected && (Math.abs(pad.steer) > 0.12 || pad.throttle > 0.05 || pad.brake > 0.05 || pad.handbrake);
+    if (padActive) {
       steer = pad.steer;
       throttle = pad.throttle;
       brake = pad.brake;
       handbrake = pad.handbrake;
-
-        } else if (this.showTouchControls()) {
+    } else if (this.showTouchControls() && !pad.connected) {
       steer = this.touchSteer;
       throttle = this.touchThrottle;
       brake = this.touchBrake;
@@ -464,6 +475,7 @@ export class App implements AfterViewInit, OnDestroy {
     this.vehicle.tuning = this.tuningService.tuning();
 
     // Query Ground Height & Normals from WorldBuilder
+    const pp = this.vehicle.position, prev = { x: pp.x, y: pp.y, z: pp.z };
     this.vehicle.updatePhysics(dt, (x, z, y) => {
       return this.sceneManager.worldBuilder.queryGround(x, z, y);
     }, (x, z) => this.sceneManager.worldBuilder.calculateRawTerrainHeight(x, z));
@@ -471,16 +483,26 @@ export class App implements AfterViewInit, OnDestroy {
     // Solid world: buildings, trees, poles and other cars
     const wb = this.sceneManager.worldBuilder;
     if (wb.ready) {
-      const hit = wb.collision.resolve(this.vehicle, this.sceneManager.trafficColliders(), dt);
+      const hit = wb.collision.resolve(this.vehicle, this.sceneManager.trafficColliders(), dt, prev);
       if (hit.impactSpeed > 1.2) {
         if (hit.hitKind === 'car') this.sceneManager.hitTraffic(hit.hitId, hit.impactSpeed);
         this.crashRumble(hit.impactSpeed); this.crashNoise = Math.max(this.crashNoise, Math.min(1, hit.impactSpeed / 8));
+        const f = Math.min(1, hit.impactSpeed / 16), now = performance.now();
+        if (now - this.lastCrashFx > 220 || f > this.lastCrashF + 0.25) {
+          this.lastCrashFx = now; this.lastCrashF = f;
+          this.audioService.playCollision(0.25 + f * 0.75);
+          this.sceneManager.cameraRig.shake = Math.max(this.sceneManager.cameraRig.shake, 0.04 + f * 0.32);
+          this.drive.impact.set(Math.max(this.drive.impact(), 0.12 + f * 0.7));
+        }
       }
+      // wedged against something for 3 s: tell the player how to get out
+      if (hit.impactSpeed > 0.05 && Math.hypot(this.vehicle.velocity.x, this.vehicle.velocity.z) < 1.5) { this.stuckT += dt; if (this.stuckT > 3) { this.stuckT = -12; this.raceSvc.flash('Stuck? Press R (or the reset button) to put the car back on its wheels.', 4500); } }
+      else if (this.stuckT > 0) this.stuckT = Math.max(0, this.stuckT - dt * 2);
     }
   }
 
   private steerSm = 0; private thrSm = 0; private brkSm = 0;
-  private lastCrashRumble = 0;
+  private lastCrashRumble = 0; private lastCrashFx = 0; private lastCrashF = 0; private stuckT = 0;
   private slowTick = 0;
   private fpsT = 0;
   private seenViews = new Set<string>();
@@ -517,7 +539,11 @@ export class App implements AfterViewInit, OnDestroy {
   // Window resize handler
   @HostListener('window:blur')
   @HostListener('document:visibilitychange')
-  onFocusLost(): void { this.hapticsService.stopAll(); }
+  onFocusLost(): void {
+    this.hapticsService.stopAll();
+    // keys released while the window was unfocused never send keyup: forget them so the car does not drive itself
+    this.keySteerLeft = this.keySteerRight = this.keyThrottle = this.keyBrake = this.keyHandbrake = false; this.keyHorn = false; this.drive.setHorn(false);
+  }
 
   @HostListener('window:resize')
   onResize(): void {
@@ -533,7 +559,6 @@ export class App implements AfterViewInit, OnDestroy {
     if ((event.target as HTMLElement | null)?.tagName === 'INPUT') return;   // typing in the lobby / chat
     if (!this.started()) { if (event.code === 'Enter') this.begin(); return; }
 
-    if (event.code === 'KeyB') { this.benchStart(); return; }
     if (event.code === 'KeyY') { try { localStorage.setItem('shesha.style', localStorage.getItem('shesha.style') === '1' ? '0' : '1'); } catch { /* ignore */ } location.reload(); return; }
     if (event.code === 'KeyF') { this.hudComponent?.showFps.update((v) => !v); return; }
     if (event.code === 'KeyY') { this.settings.toggleTheme(); return; }
@@ -550,6 +575,7 @@ export class App implements AfterViewInit, OnDestroy {
     if (event.code === 'KeyK') { this.sceneManager.cameraRig.recentreLook(); return; }
     if (event.code === 'F1' || event.code === 'Slash' || event.code === 'KeyI') { event.preventDefault(); this.showHelp.update((v) => !v); return; }
     if (event.code === 'KeyV') { this.showCars.update((v) => !v); return; }
+    if (event.code === 'F2') { event.preventDefault(); this.showPadSetup.update((v) => !v); this.gamepadService.cancelLearn(); return; }
     if (event.code === 'KeyJ') { this.mp.menu.update((v) => !v); return; }
     switch (event.code) {
       case 'ArrowLeft':
@@ -626,8 +652,11 @@ export class App implements AfterViewInit, OnDestroy {
 
   public resetCarUpright(): void {
     if (!this.vehicle) return;
-    const y = this.sceneManager.worldBuilder.calculateRawTerrainHeight(this.vehicle.position.x, this.vehicle.position.z);
-    this.vehicle.position.y = y + 0.6;
+    const wb = this.sceneManager.worldBuilder, p = this.vehicle.position;
+    const free = wb.collision.freeSpot(p.x, p.z, p.y);   // never respawn inside a wall, tree or other car
+    p.x = free.x; p.z = free.z;
+    p.y = wb.groundHeightAt(p.x, p.z, p.y + 1) + 0.6;
+    this.stuckT = 0;
     this.vehicle.velocity.set(0, 0, 0);
     this.vehicle.angularVelocity.set(0, 0, 0);
     const yaw = new THREE.Euler().setFromQuaternion(this.vehicle.quaternion).y;

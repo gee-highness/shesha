@@ -82,7 +82,7 @@ import { WorldPipelineService } from '../../services/world-pipeline.service';
       </div>
 
       @if (showFps()) {
-        <div class="absolute left-4 top-[74px] hud-card px-3 py-1.5 text-[11px] font-mono pointer-events-none" [class.text-emerald-300]="fpsText().startsWith('6') || fpsText().startsWith('5')" [class.text-amber-300]="!fpsText().startsWith('6') && !fpsText().startsWith('5')">{{ fpsText() }}</div>
+        <div class="absolute left-4 top-[74px] whitespace-pre hud-card px-3 py-1.5 text-[11px] font-mono pointer-events-none" [class.text-emerald-300]="fpsText().startsWith('6') || fpsText().startsWith('5')" [class.text-amber-300]="!fpsText().startsWith('6') && !fpsText().startsWith('5')">{{ fpsText() }}</div>
       }
 
       <!-- Event banner -->
@@ -256,6 +256,7 @@ export class HudComponent {
   openMap = output<void>();
   openCars = output<void>();
   openOnline = output<void>();
+  openPadSetup = output<void>();
   openTuning = output<void>();
   toggleTelemetry = output<void>();
   openPhotoMode = output<void>();
@@ -272,6 +273,7 @@ export class HudComponent {
   readonly actions = [
     { id: 'cars', label: 'Choose car', key: 'V', icon: 'directions_car', color: 'text-rose-300' },
     { id: 'online', label: 'Multiplayer', key: 'J', icon: 'groups', color: 'text-emerald-300' },
+    { id: 'padsetup', label: 'Controller setup', key: 'F2', icon: 'sports_esports', color: 'text-cyan-300' },
     { id: 'map', label: 'Map', key: 'M', icon: 'map', color: 'text-amber-300' },
     { id: 'garage', label: 'Garage', key: 'G', icon: 'tune', color: 'text-cyan-300' },
     { id: 'telemetry', label: 'Telemetry', key: 'T', icon: 'query_stats', color: 'text-emerald-300' },
@@ -304,6 +306,7 @@ export class HudComponent {
     switch (id) {
       case 'cars': this.openCars.emit(); break;
       case 'online': this.openOnline.emit(); break;
+      case 'padsetup': this.openPadSetup.emit(); break;
       case 'map': this.openMap.emit(); break;
       case 'garage': this.openTuning.emit(); break;
       case 'telemetry': this.toggleTelemetry.emit(); break;
