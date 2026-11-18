@@ -61,9 +61,9 @@ export class RoadTraffic {
     this.addPublicTransport();
     this.prox = new THREE.InstancedMesh(RoadTraffic.silhouette(), new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.5, metalness: 0.3 }), this.N + 9); this.prox.name = 'traffic-far'; this.prox.frustumCulled = false; this.prox.count = 0; this.scene.add(this.prox);
     // the real street mix: white/silver sedans, hatches, bakkies and SUVs (generated bodies, ~1.5k triangles, one material)
-    const MIX: CarKind[] = ['sedan', 'bakkie', 'hatch', 'suv', 'sedan', 'hatch', 'bakkie1', 'sedan', 'suv', 'hatch', 'coupe', 'cruiser', 'bakkie', 'hatch', 'sedan'];
+    const MIX: CarKind[] = ['sedan', 'bakkie', 'hatch', 'suv', 'taxi', 'hothatch', 'bakkie1', 'sedan', 'lux', 'hatch', 'coupe', 'cruiser', 'bakkie', 'kombi', 'sport', 'box', 'sedan', 'police', 'suv', 'hatch', 'dropside', 'sedan'];
     for (let i = 0; i < this.N; i++) {
-      const kind = MIX[i % MIX.length], col = PAINTS[(i * 7 + 3) % PAINTS.length];
+      const kind = MIX[i % MIX.length], col = kind === 'taxi' ? [0.95, 0.76, 0.08] : kind === 'police' ? [0.96, 0.96, 0.95] : PAINTS[(i * 7 + 3) % PAINTS.length];
       const g = makeCar(kind, col); g.visible = false;
       g.userData['pc'] = new THREE.Color(col[0], col[1], col[2]); g.userData['ps'] = [1, 1, 1];
       this.scene.add(g);

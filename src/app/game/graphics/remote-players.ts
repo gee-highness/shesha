@@ -7,7 +7,8 @@ import type { PeerState } from '../../services/multiplayer.service';
 /** Which generated body stands in for a catalogue car on other players' screens (same shapes everywhere, so nothing extra to download). */
 function kindOf(id: string): CarKind {
   const d = CAR_CATALOG.find((c) => c.id === id); if (d?.gen) return d.gen;
-  if (/ferrari|race|sports|kart/.test(id)) return /hatch/.test(id) ? 'hatch' : 'coupe';
+  if (/ferrari/.test(id)) return 'gt';
+  if (/race|sports|kart/.test(id)) return /hatch/.test(id) ? 'hothatch' : 'sport';
   if (/suv|police/.test(id)) return /police/.test(id) ? 'sedan' : 'suv';
   if (/van|ambulance/.test(id)) return 'minibus';
   if (/truck|delivery|tractor|garbage|fire/.test(id)) return 'bakkie';

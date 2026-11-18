@@ -307,11 +307,11 @@ export class StreetBuilder {
   public async placeParked(list: { m: string; x: number; z: number; rot: number }[]): Promise<void> {
     const w = this.w;
     // parked cars are generated bodies in real paint colours (kind follows the old model name, colour varies per spot)
-    const KIND: Record<string, CarKind> = { taxi: 'sedan', sedan: 'sedan', 'sedan-sports': 'sedan', 'hatchback-sports': 'hatch', suv: 'suv', 'suv-luxury': 'suv', van: 'minibus', delivery: 'bakkie', 'delivery-flat': 'bakkie', truck: 'bakkie', 'truck-flat': 'bakkie', police: 'sedan', ambulance: 'minibus' };
+    const KIND: Record<string, CarKind> = { taxi: 'taxi', sedan: 'sedan', 'sedan-sports': 'sport', 'hatchback-sports': 'hothatch', suv: 'suv', 'suv-luxury': 'lux', van: 'minibus', delivery: 'box', 'delivery-flat': 'dropside', truck: 'bakkie', 'truck-flat': 'bakkie1', police: 'police', ambulance: 'minibus' };
     for (const c of list) {
-      const k = Math.floor(rnd(c.x * 0.37 + c.z * 0.91) * PAINTS.length), kind = KIND[c.m] ?? (['sedan', 'hatch', 'bakkie', 'suv'] as CarKind[])[Math.floor(rnd(c.x + c.z * 3.1) * 4)];
+      const k = Math.floor(rnd(c.x * 0.37 + c.z * 0.91) * PAINTS.length), kind = KIND[c.m] ?? (['sedan', 'hatch', 'bakkie', 'suv', 'sedan', 'hatch', 'coupe', 'kombi', 'cruiser', 'sport'] as CarKind[])[Math.floor(rnd(c.x + c.z * 3.1) * 10)];
       const key = `${kind}#${k}`; c.m = key;
-      if (!this.carParts.has(key)) this.carParts.set(key, [carStatic(kind, kind === 'minibus' ? [0.94, 0.94, 0.92] : PAINTS[k], kind === 'minibus' ? PAINTS[9 + (k % 3)] : undefined)]);
+      if (!this.carParts.has(key)) this.carParts.set(key, [carStatic(kind, kind === 'minibus' || kind === 'police' ? [0.94, 0.94, 0.92] : kind === 'taxi' ? [0.95, 0.76, 0.08] : PAINTS[k], kind === 'minibus' ? PAINTS[9 + (k % 3)] : undefined)]);
     }
     if (!this.carMat) this.carMat = carPaintMat;
     const tint = (g: THREE.BufferGeometry, c: number[]) => { const n = g.attributes['position'].count, a = new Float32Array(n * 3); for (let i = 0; i < n; i++) { a[i * 3] = c[0]; a[i * 3 + 1] = c[1]; a[i * 3 + 2] = c[2]; } g.setAttribute('color', new THREE.BufferAttribute(a, 3)); g.deleteAttribute('uv'); return g; };
