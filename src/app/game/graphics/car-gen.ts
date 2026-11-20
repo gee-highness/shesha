@@ -113,12 +113,22 @@ const tyreW = (s: Spec, r: number): number => s.tw ?? (s.kit === 'gt' || s.kit =
 
 // ---------------------------------------------------------------- geometry builders
 type Buckets = THREE.BufferGeometry[][];
+/** Polished alloy colours (wheel faces) registered by the wheel builder. */
+const ALLOY = new WeakSet<number[]>();
+/**
+ * Surface type of a colour, read by the vehicle shader (one draw call, many real materials):
+ * 0 paint (clear-coated, metallic flake) · 1 glass · 2 chrome · 3 gloss-black trim · 4 matte rubber / plastic · 5 carbon fibre
+ * 6 tyre rubber · 7 brushed / cast metal · 8 plate / vinyl · 9 polished alloy
+ */
+function surfOf(c: number[]): number {
+  return c === GLASS ? 1 : c === CHROME ? 2 : c === GBLACK ? 3 : c === DARK ? 4 : c === CARBON ? 5 : c === TYRE ? 6 : c === STEEL || c === GUN ? 7 : c === PLATE ? 8 : ALLOY.has(c) ? 9 : 0;
+}
 function paint(g: THREE.BufferGeometry, c: number[]): THREE.BufferGeometry {
   if (g.index) { const n = g.toNonIndexed(); g.dispose(); g = n; }
   for (const k of Object.keys(g.attributes)) if (k !== 'position' && k !== 'normal') g.deleteAttribute(k);
-  const n = g.attributes['position'].count, a = new Float32Array(n * 3);
+  const n = g.attributes['position'].count, a = new Float32Array(n * 3), sf = new Float32Array(n).fill(surfOf(c));
   for (let i = 0; i < n; i++) { a[i * 3] = c[0]; a[i * 3 + 1] = c[1]; a[i * 3 + 2] = c[2]; }
-  g.setAttribute('color', new THREE.BufferAttribute(a, 3)); return g;
+  g.setAttribute('color', new THREE.BufferAttribute(a, 3)); g.setAttribute('surf', new THREE.BufferAttribute(sf, 1)); return g;
 }
 /** Turn a surface inside out (render its inner faces). */
 function flip(g: THREE.BufferGeometry): THREE.BufferGeometry {
@@ -200,7 +210,8 @@ function loft(s: Spec, col: number[], d: Dress, liv?: Liv): void {
   const g = g0.toNonIndexed(); g0.dispose();
   const nTri = g.attributes['position'].count / 3, ca = new Float32Array(nTri * 9), pa = g.attributes['position'];
   for (let t = 0; t < nTri; t++) { const q = triCol[t] ?? col; for (let v = 0; v < 3; v++) { const y = pa.getY(t * 3 + v), ao = 0.72 + 0.28 * Math.min(1, Math.max(0, (y - s.sill + 0.05) / Math.max(0.2, s.belt - s.sill))); ca[t * 9 + v * 3] = q[0] * ao; ca[t * 9 + v * 3 + 1] = q[1] * ao; ca[t * 9 + v * 3 + 2] = q[2] * ao; } }
-  g.setAttribute('color', new THREE.BufferAttribute(ca, 3)); d.b[0].push(g);
+  const sa = new Float32Array(nTri * 3); for (let t = 0; t < nTri; t++) sa[t * 3] = sa[t * 3 + 1] = sa[t * 3 + 2] = surfOf(triCol[t] ?? col);
+  g.setAttribute('color', new THREE.BufferAttribute(ca, 3)); g.setAttribute('surf', new THREE.BufferAttribute(sa, 1)); d.b[0].push(g);
 }
 
 // ---------------------------------------------------------------- dressing: lamps, grilles, aero, kit, cargo
@@ -550,7 +561,7 @@ function buildWheel(r: number, style: Rim, w: number, lite: boolean, rimCol?: nu
   for (const [x, y] of lite ? [pts[0], pts[3], pts[4], pts[7]] : pts) prof.push(new THREE.Vector2(x, y));
   const tyre = new THREE.LatheGeometry(prof, seg); tyre.rotateZ(Math.PI / 2); d.put(tyre, TYRE);
   if (style === 'tractor' && !lite) for (let k = 0; k < 18; k++) for (const sd of [-1, 1]) { const a = (k / 18) * Math.PI * 2 + (sd > 0 ? 0.17 : 0); const lug = new THREE.BoxGeometry(hw * 0.95, 0.07, 0.11); lug.rotateX(-sd * 0.5); lug.translate(sd * hw * 0.47, r + 0.02, 0); lug.rotateX(a); d.put(lug, TYRE); }
-  const rimC = rimCol ?? rimColour(style);
+  const rimC = (rimCol ?? rimColour(style)).slice(); if (style !== 'steel' && style !== 'tractor') ALLOY.add(rimC);
   for (const sd of lite ? [1] : [-1, 1]) {   // far LOD: outer face only (carStatic turns left-side wheels around)
     const face = sd * (hw - 0.025);
     const barrel = new THREE.CircleGeometry(rimR * 0.98, seg); barrel.rotateY((sd * Math.PI) / 2); barrel.translate(face - sd * 0.05, 0, 0); d.put(barrel, GUN);
@@ -586,10 +597,58 @@ const wheelOf = (kind: CarKind, i: number, lite: boolean, rim?: number[]): THREE
   return wheelGeo(r, s.rim, w, lite, rim);
 };
 
+/**
+ * Real materials on vertex-coloured vehicles, all in the body's one draw call: the 'surf' attribute picks the surface model per
+ * fragment. High-frequency detail (paint flake, carbon weave, tread, brushing) is computed in object space, so it stays sharp at any
+ * zoom, costs no texture memory, and fades with the pixel footprint (no shimmer, nothing spent at distance).
+ */
+function vehicleSurfaces<T extends THREE.MeshStandardMaterial>(m: T): T {
+  m.onBeforeCompile = (sh) => {
+    sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nattribute float surf; varying float vSurf; varying vec3 vObj;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvSurf = surf; vObj = position;');
+    sh.fragmentShader = sh.fragmentShader.replace('#include <common>', `#include <common>
+      varying float vSurf; varying vec3 vObj; float sId = 0.0; float sHi = 1.0;
+      float vh1(vec3 p){ p = fract(p * 0.3183099 + 0.1); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }
+      vec3 vh3(vec3 p){ return vec3(vh1(p), vh1(p + 19.19), vh1(p + 47.47)); }`)
+      .replace('#include <metalnessmap_fragment>', `#include <metalnessmap_fragment>
+      sId = floor(vSurf + 0.5);
+      vec3 oN = normalize(cross(dFdx(vObj), dFdy(vObj)));
+      float ofw = length(fwidth(vObj)); sHi = clamp(1.0 - ofw * 140.0, 0.0, 1.0);
+      vec2 tp = abs(oN.y) > 0.6 ? vObj.xz : (abs(oN.x) > 0.6 ? vObj.zy : vObj.xy);     // the face's own plane (triplanar pick)
+      if (sId == 1.0) { roughnessFactor = 0.02; metalnessFactor = 0.0; diffuseColor.rgb *= 0.8; }                                   // glass
+      else if (sId == 2.0) { roughnessFactor = 0.05; metalnessFactor = 1.0; diffuseColor.rgb = vec3(0.92, 0.93, 0.95); }            // chrome
+      else if (sId == 3.0) { roughnessFactor = 0.2; metalnessFactor = 0.0; }                                                       // gloss black trim
+      else if (sId == 4.0) { roughnessFactor = 0.82 + 0.1 * vh1(floor(vObj * 400.0)) * sHi; metalnessFactor = 0.0; }               // matte rubber / textured plastic
+      else if (sId == 5.0) {                                                                                                        // carbon fibre: 2x2 twill under lacquer
+        vec2 cp = tp * 140.0; float tow = mod(floor(cp.x) + floor(cp.y * 0.5 + floor(cp.x) * 0.5), 2.0);
+        float sheen = 0.5 + 0.5 * sin(fract(tow > 0.5 ? cp.x : cp.y) * 3.14159);
+        diffuseColor.rgb = mix(vec3(0.045), mix(vec3(0.025, 0.026, 0.03), vec3(0.11, 0.115, 0.125), sheen), sHi); roughnessFactor = mix(0.35, 0.18 + 0.15 * (1.0 - sheen), sHi); metalnessFactor = 0.2; }
+      else if (sId == 6.0) {                                                                                                        // tyre rubber: tread blocks, sidewall grain
+        float r = length(vObj.yz), ang = atan(vObj.y, vObj.z), tread = 1.0 - step(0.5, abs(oN.x));
+        float blk = step(0.78, fract(ang * 30.0 / 6.2832 + step(0.0, vObj.x) * 0.5)) + step(0.9, fract(abs(vObj.x) * 22.0));
+        diffuseColor.rgb *= mix(1.0, 1.0 - 0.55 * min(blk, 1.0), tread * sHi) * (0.92 + 0.12 * vh1(floor(vObj * 300.0)) * sHi);
+        diffuseColor.rgb += (1.0 - tread) * sHi * step(0.93, fract(r * 40.0)) * 0.015;                                            // moulded sidewall rings
+        roughnessFactor = 0.9; metalnessFactor = 0.0; }
+      else if (sId == 7.0) { float br = vh1(vec3(floor(tp.y * 900.0), 1.0, 2.0)); roughnessFactor = mix(0.42, 0.28 + 0.2 * br, sHi); metalnessFactor = 0.85; diffuseColor.rgb *= 0.9 + 0.12 * br * sHi; }   // brushed / cast metal
+      else if (sId == 8.0) { roughnessFactor = 0.35; metalnessFactor = 0.0; }                                                       // plate / vinyl
+      else if (sId == 9.0) { float rad = length(vObj.yz); roughnessFactor = 0.16 + 0.06 * step(0.5, fract(rad * 160.0)) * sHi; metalnessFactor = 1.0; }   // polished alloy, machined rings
+      `)
+      .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
+      if (sId == 0.0 && metalnessFactor > 0.25) { vec3 fl = vh3(floor(vObj * 1100.0)) - 0.5; normal = normalize(normal + fl * 0.16 * sHi); }   // metallic flakes under the clear coat
+      if (sId == 7.0 || sId == 4.0) { normal = normalize(normal + (vh3(floor(vObj * 500.0)) - 0.5) * 0.05 * sHi); }`)
+      .replace('#include <lights_physical_fragment>', `#include <lights_physical_fragment>
+      #ifdef USE_CLEARCOAT
+      material.clearcoat *= (sId == 0.0 || sId == 5.0) ? 1.0 : 0.0;
+      #endif`);
+  };
+  const key = m.type + '|veh-surf1'; m.customProgramCacheKey = () => key;
+  return m;
+}
+
 /** Glossy two-layer look without a physical material: metallic base, sky reflections from the scene environment. */
-export const carPaintMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.24, metalness: 0.5, envMapIntensity: 1.35 });
+export const carPaintMat = vehicleSurfaces(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.24, metalness: 0.5, envMapIntensity: 1.35 }));
 /** Player's own car: same vertex-coloured shell under a clear coat. */
-export const playerPaintMat = new THREE.MeshPhysicalMaterial({ vertexColors: true, roughness: 0.3, metalness: 0.5, clearcoat: 1, clearcoatRoughness: 0.04, envMapIntensity: 1.3 });
+export const playerPaintMat = vehicleSurfaces(new THREE.MeshPhysicalMaterial({ vertexColors: true, roughness: 0.3, metalness: 0.5, clearcoat: 1, clearcoatRoughness: 0.04, envMapIntensity: 1.3 }));
 export type PaintFinish = 'metallic' | 'gloss' | 'matte' | 'pearlescent';
 const finishMats = new Map<PaintFinish, THREE.MeshPhysicalMaterial>();
 /** Player paint in a chosen finish: metallic flake, solid gloss, satin matte, or a pearl that shifts colour with the angle. */
@@ -599,11 +658,11 @@ export function playerPaint(f: PaintFinish): THREE.MeshPhysicalMaterial {
     : f === 'gloss' ? new THREE.MeshPhysicalMaterial({ vertexColors: true, roughness: 0.22, metalness: 0.08, clearcoat: 1, clearcoatRoughness: 0.03, envMapIntensity: 1.2 })
     : f === 'matte' ? new THREE.MeshPhysicalMaterial({ vertexColors: true, roughness: 0.78, metalness: 0.05, clearcoat: 0, envMapIntensity: 0.6 })
     : new THREE.MeshPhysicalMaterial({ vertexColors: true, roughness: 0.26, metalness: 0.35, clearcoat: 1, clearcoatRoughness: 0.05, iridescence: 0.7, iridescenceIOR: 1.6, iridescenceThicknessRange: [180, 520], envMapIntensity: 1.35 });
-  finishMats.set(f, m); return m;
+  if (f !== 'metallic') vehicleSurfaces(m); finishMats.set(f, m); return m;
 }
 /** Lamps: unlit, so LED signatures read at any time of day (values above 1 bloom). */
 export const lampMat = new THREE.MeshBasicMaterial({ vertexColors: true });
-const wheelMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.45, metalness: 0.5, envMapIntensity: 1.1 });
+const wheelMat = vehicleSurfaces(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.45, metalness: 0.5, envMapIntensity: 1.1 }));
 
 /** Whole static vehicle (body + wheels) as one single-material geometry: parked cars. Reduced detail. */
 export function carStatic(kind: CarKind, col: number[], stripe?: number[]): THREE.BufferGeometry {
