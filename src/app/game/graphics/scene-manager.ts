@@ -97,6 +97,7 @@ export class SceneManager {
     this.cameraRig = new CameraRig(container.clientWidth / container.clientHeight);
 
     this.worldBuilder = new WorldBuilder();
+    this.worldBuilder.renderer = this.renderer;
     this.worldBuilder.buildWorld(this.scene);
     this.worldBuilder.shadowsOn = this.renderer.shadowMap.enabled;
     if (!this.renderer.shadowMap.enabled) this.makeBlobShadow();

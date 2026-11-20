@@ -25,6 +25,7 @@ interface WorldMeta {
 }
 interface Surf { way: RoadWay; h: number; elev: boolean; px: number; pz: number; d: number }
 import { PAVE_LIFT } from './street-constants';
+import { Forest } from './forest';
 import { TOWN_GROUND_DECL, TOWN_GROUND_APPLY } from './town-ground';
 type MaskUni = { uRoadMask: { value: THREE.Texture }; uMaskBox: { value: THREE.Vector4 }; uMaskOn: { value: number } };
 export interface RoadWay { c: number; w: number; u: number; o: number; n: string; p: number[]; sw?: number; bay?: number; dz?: number[]; br?: number; bk?: number; ms?: number; rg?: number; rb?: number }
@@ -56,6 +57,9 @@ export class WorldBuilder {
   public bridgeGroup = new THREE.Group();
   public landmarksGroup = new THREE.Group();
   public foliageGroup = new THREE.Group();
+  /** Set by the scene manager before buildWorld: used to bake tree impostors. */
+  public renderer?: THREE.WebGLRenderer;
+  private forest?: Forest;
   public mountainBackdropGroup = new THREE.Group();
   public roadInfrastructureGroup = new THREE.Group();
   public highwayCurve = new THREE.CatmullRomCurve3([new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 0, -100)]);
@@ -442,6 +446,7 @@ export class WorldBuilder {
   private visDirty = true; private visX = 1e9; private visZ = 1e9; private visT = 0; private shadowT = 0;
   /** Streams chunks in/out by distance. Visibility only re-evaluates after moving ~12 m or 250 ms; new chunks force a refresh. */
   public update(px: number, pz: number): void {
+    this.forest?.update(px, pz);
     this.city?.update(px, pz);
     this.updateLampLight(px, pz);
     this.streets?.updateCars(px, pz);
@@ -503,6 +508,7 @@ export class WorldBuilder {
     if (feats) { this.features = new FeaturesBuilder(this, feats as Features); this.features.build(); }
     this.flushProps();
     this.city.prime();
+    if (this.renderer) { this.forest = new Forest(this.renderer); await this.forest.load().catch(() => undefined); this.foliageGroup.add(this.forest.group); }
     this.buildTrees(scene, tbuf);
     this.buildStreetFurniture(scene);
     this.buildLabels(scene);
@@ -909,8 +915,22 @@ export class WorldBuilder {
       const k = `${sp}:${Math.floor(x / TCH)},${Math.floor(z / TCH)}`; let l = byChunk.get(k); if (!l) { l = []; byChunk.set(k, l); } l.push({ x, z, c, sp });
     }
     const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), col = new THREE.Color();
+    const forest = this.forest?.ready ? this.forest : null;
     byChunk.forEach((list, key) => {
-      const sp = list[0].sp; const im = new THREE.InstancedMesh(sp === 1 ? geoCon : sp === 2 ? geoPalm : geo, mat, list.length); im.name = 'trees'; im.castShadow = true;
+      const sp = list[0].sp;
+      if (forest && sp !== 2) {   // real CC0 tree models: impostors here, full models streamed in around the player
+        const spots = list.map((t) => {
+          const h = WorldBuilder.hash(t.x * 5, t.z * 7), r = WorldBuilder.hash(t.x, t.z), k = WorldBuilder.hash(t.z * 3, t.x * 2);
+          const si = sp === 1 ? (k < 0.5 ? 3 : 4) : h < 0.14 ? 5 : k < 0.4 ? 0 : k < 0.75 ? 1 : 2;
+          const s = (si === 5 ? 0.62 : si >= 3 ? 1.05 : 0.95) * (0.8 + r * 0.45) * (t.c === 5 ? 1.3 : 1);
+          const g = 0.88 + WorldBuilder.hash(t.x * 2, t.z * 3) * 0.24;
+          return { x: t.x, y: this.calculateRawTerrainHeight(t.x, t.z) - 0.1, z: t.z, rot: WorldBuilder.hash(t.z, t.x) * 6.28, s, sp: si, tint: new THREE.Color(g, g, g) };
+        });
+        const im = forest.impostors(spots); im.userData['far'] = 700;
+        const [cxI, czI] = key.split(':')[1].split(',').map(Number);
+        im.visible = false; this.visDirty = true; this.chunks.push({ obj: im, cx: (cxI + 0.5) * TCH, cz: (czI + 0.5) * TCH, r: TCH * 0.75, half: TCH / 2 });
+        this.foliageGroup.add(im); return;
+      } const im = new THREE.InstancedMesh(sp === 1 ? geoCon : sp === 2 ? geoPalm : geo, mat, list.length); im.name = 'trees'; im.castShadow = true;
       list.forEach((t, i) => {
         const s = (sp === 2 ? 0.85 : 0.7) + WorldBuilder.hash(t.x, t.z) * (sp === 2 ? 0.4 : 0.9);
         q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), WorldBuilder.hash(t.z, t.x) * 6.28);
