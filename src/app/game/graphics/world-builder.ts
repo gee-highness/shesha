@@ -25,6 +25,7 @@ interface WorldMeta {
 }
 interface Surf { way: RoadWay; h: number; elev: boolean; px: number; pz: number; d: number }
 import { PAVE_LIFT } from './street-constants';
+import { TOWN_GROUND_DECL, TOWN_GROUND_APPLY } from './town-ground';
 type MaskUni = { uRoadMask: { value: THREE.Texture }; uMaskBox: { value: THREE.Vector4 }; uMaskOn: { value: number } };
 export interface RoadWay { c: number; w: number; u: number; o: number; n: string; p: number[]; sw?: number; bay?: number; dz?: number[]; br?: number; bk?: number; ms?: number; rg?: number; rb?: number }
 
@@ -488,6 +489,8 @@ export class WorldBuilder {
     this.bakeHeightGrid();
     this.indexRoads();
     this.relocateProps(feats as { trees?: number[][]; towers?: number[][]; tanks?: number[][] } | null);
+    { const t = new THREE.DataTexture(this.groundCls, meta.gw, meta.gh, THREE.RedFormat); t.magFilter = t.minFilter = THREE.NearestFilter; t.generateMipmaps = false; t.needsUpdate = true;
+      this.clsUni.uGroundCls.value = t; this.clsUni.uClsBox.value.set(meta.bounds[0], meta.bounds[2], meta.gw * meta.px, meta.gh * meta.px); }
     this.buildTerrain(scene, groundTex);
     this.buildRoads(scene);
     this.waterPolys = (roads.water as { p: number[] }[]).map((q) => q.p);
@@ -579,6 +582,8 @@ export class WorldBuilder {
   }
 
   // ------------------------------------------------------------------ terrain
+  /** Land-use raster for the town-ground shader (10 m cells, nearest). */
+  private clsUni = { uGroundCls: { value: null as THREE.Texture | null }, uClsBox: { value: new THREE.Vector4(0, 0, 1, 1) } };
   private orthoUni = { uOrtho: { value: null as THREE.Texture | null }, uOrthoMask: { value: null as THREE.Texture | null }, uOrthoBox: { value: new THREE.Vector4(0, 1, 0, 1) }, uOrthoOn: { value: 0 } };
   /** Aerial orthophoto ground layer (desktop only: a 4k texture is too much memory for phones). */
   private loadOrtho(): void {
@@ -595,14 +600,14 @@ export class WorldBuilder {
   private buildTerrain(scene: THREE.Scene, groundTex: THREE.Texture): void {
     this.loadOrtho();
     const detail0 = 0; void detail0;
-    const tPrevKey = 'terrain-style2';
+    const tPrevKey = 'terrain-style3';
     const makeMat = (mask: MaskUni): THREE.MeshStandardMaterial => {
     const mat = new THREE.MeshStandardMaterial({ map: groundTex, roughness: 0.95, metalness: 0 });
     mat.onBeforeCompile = (sh) => {
       sh.uniforms['uNoise'] = { value: noiseTex() };
       sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vW;')
         .replace('#include <begin_vertex>', '#include <begin_vertex>\nvW = (modelMatrix * vec4(transformed,1.0)).xyz;');
-      sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nvarying vec3 vW;\n' + STYLE_FUNCS)
+      sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nvarying vec3 vW;\n' + STYLE_FUNCS + TOWN_GROUND_DECL)
         .replace('#include <map_fragment>', `#include <map_fragment>
           float l1 = 0.12 + 0.5 * sfbm(vW.xz*0.21 + 3.0), l2 = sfbm(vW.xz*0.0113 + 7.0);
           float sat = max(diffuseColor.r, max(diffuseColor.g, diffuseColor.b)) - min(diffuseColor.r, min(diffuseColor.g, diffuseColor.b));
@@ -620,12 +625,13 @@ export class WorldBuilder {
               vec3 oc = texture2D(uOrtho, ouv).rgb * (0.9 + 0.22 * sfbm(vW.xz * 1.9 + 11.0));   // sub-pixel grain so it never looks smeared up close
               diffuseColor.rgb = mix(diffuseColor.rgb, oc, om);
             }
-          }`);
+          }
+          ${TOWN_GROUND_APPLY}`);
       sh.fragmentShader = sh.fragmentShader.replace('varying vec3 vW;', 'varying vec3 vW;\nuniform sampler2D uOrtho; uniform sampler2D uOrthoMask; uniform vec4 uOrthoBox; uniform float uOrthoOn;\nuniform sampler2D uRoadMask; uniform vec4 uMaskBox; uniform float uMaskOn;')
         // boolean cut: no ground over a sunken carriageway (mask = signed distance to the road edge, baked per tile)
         .replace('#include <clipping_planes_fragment>', `#include <clipping_planes_fragment>
           if (uMaskOn > 0.5) { vec2 muv = (vW.xz - uMaskBox.xy) / uMaskBox.zw; if (muv.x > 0.0 && muv.y > 0.0 && muv.x < 1.0 && muv.y < 1.0 && texture2D(uRoadMask, muv).r > 0.5) discard; }`);
-      Object.assign(sh.uniforms, this.orthoUni, mask);
+      Object.assign(sh.uniforms, this.orthoUni, this.clsUni, mask);
     };
     mat.customProgramCacheKey = () => tPrevKey; addLampLight(mat);
     return mat;
@@ -654,7 +660,7 @@ export class WorldBuilder {
       for (let b = 0; b < BANDS; b++) {
         const d = RANGE - ((b + 0.5) / BANDS) * 2 * RANGE, half = hw + 0.02 + d; if (half <= 0.05) continue;   // widest stroke = lowest value
         const v = Math.round(Math.max(0, Math.min(1, 0.5 - d / (2 * RANGE))) * 255);
-        g.strokeStyle = `rgb(${v},${v},${v})`; g.lineWidth = (2 * half) / R; g.beginPath(); let pen = false;
+        g.strokeStyle = `rgb(${v},0,0)`; g.lineWidth = (2 * half) / R; g.beginPath(); let pen = false;
         for (let i = 0; i < p.length; i += 2) {
           const x = (p[i] / 10 - X0) / R, y = (p[i + 1] / 10 - Z0) / R, deck = dz ? dz[i / 2] / 10 > 0.25 : false;
           if (deck) { pen = false; continue; }   // overpass decks stand clear of the ground: no cut under them
@@ -663,9 +669,18 @@ export class WorldBuilder {
         g.stroke(); any = true;
       }
     }
+    // building-proximity field (green): 1 inside the footprint, apron to ~2 m, yard / driveway out to ~7 m
+    for (let a = Math.floor((X0 - 20) / 40); a <= Math.floor((X0 + S + 20) / 40); a++) for (let b = Math.floor((Z0 - 20) / 40); b <= Math.floor((Z0 + S + 20) / 40); b++) {
+      const l = this.bGrid.get(a * 100003 + b); if (!l) continue;
+      for (let k = 0; k < l.length; k += 3) {
+        const r = Math.max(1.5, l[k + 2] - 1.5), R2 = r + 7, x = (l[k] - X0) / R, y = (l[k + 1] - Z0) / R;
+        const gr = g.createRadialGradient(x, y, 0, x, y, R2 / R); gr.addColorStop(0, 'rgb(0,255,0)'); gr.addColorStop(r / R2, 'rgb(0,242,0)'); gr.addColorStop((r + 2) / R2, 'rgb(0,140,0)'); gr.addColorStop(1, 'rgb(0,0,0)');
+        g.fillStyle = gr; g.fillRect(x - R2 / R, y - R2 / R, (2 * R2) / R, (2 * R2) / R); any = true;
+      }
+    }
     if (!any) { mask.uMaskOn.value = 0; return; }
-    const img = g.getImageData(0, 0, N, N).data, red = new Uint8Array(N * N); for (let i = 0; i < N * N; i++) red[i] = img[i * 4];
-    const tex = new THREE.DataTexture(red, N, N, THREE.RedFormat); tex.magFilter = THREE.LinearFilter; tex.minFilter = THREE.LinearFilter; tex.generateMipmaps = false; tex.needsUpdate = true;
+    const img = g.getImageData(0, 0, N, N).data, rg = new Uint8Array(N * N * 2); for (let i = 0; i < N * N; i++) { rg[i * 2] = img[i * 4]; rg[i * 2 + 1] = img[i * 4 + 1]; }
+    const tex = new THREE.DataTexture(rg, N, N, THREE.RGFormat); tex.magFilter = THREE.LinearFilter; tex.minFilter = THREE.LinearFilter; tex.generateMipmaps = false; tex.needsUpdate = true;
     if (mask.uRoadMask.value !== WorldBuilder.blankMask) mask.uRoadMask.value.dispose();
     mask.uRoadMask.value = tex; mask.uMaskBox.value.set(X0, Z0, S, S); mask.uMaskOn.value = 1;
   }
