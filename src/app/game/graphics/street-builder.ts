@@ -37,9 +37,9 @@ export class StreetBuilder {
   build(scene: THREE.Scene): void {
     const w = this.w;
     const pave1 = w.pbr('herringbone_pavement_03', 2.4, 0.85), pave2 = w.pbr('concrete_pavement', 3, 0.9);
-    // future city: dark glossy pavement slabs edged with a light-strip kerb
-    for (const m of [pave1, pave2]) { m.polygonOffset = true; m.polygonOffsetFactor = -3; m.polygonOffsetUnits = -3; m.color.setHex(0x56627f); m.roughness = 0.38; m.metalness = 0.25; m.emissive.setHex(0x0a1426); }
-    const curb = new THREE.MeshStandardMaterial({ color: 0x1a2a3e, roughness: 0.35, metalness: 0.3, emissive: 0x16c8e8, emissiveIntensity: 0.95, vertexColors: false });
+    // real street concrete: matt, weathered light-grey slabs edged with a paler, chunky kerbstone (no glow)
+    for (const m of [pave1, pave2]) { m.polygonOffset = true; m.polygonOffsetFactor = -3; m.polygonOffsetUnits = -3; m.color.setHex(0xb4b2ab); m.roughness = 0.94; m.metalness = 0; m.emissive.setHex(0x000000); }
+    const curb = new THREE.MeshStandardMaterial({ color: 0xd2cfc6, roughness: 0.9, metalness: 0, vertexColors: false });
     const props = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.7, metalness: 0.15, side: THREE.DoubleSide });
     const decal = new THREE.MeshStandardMaterial({ color: 0xf2f2ee, roughness: 0.7, polygonOffset: true, polygonOffsetFactor: -6, polygonOffsetUnits: -6 });
     for (const m of [curb, props, decal]) addLampLight(m);
@@ -89,8 +89,12 @@ export class StreetBuilder {
   private sidewalks(): void {
     const w = this.w; const lift = (c: number) => w.roadLift(c);
     for (const way of w.roadWays) {
-      if (way.c < 1 || way.c > 6 || way.u || way.dz) continue;
+      if (way.c < 1 || way.c > 6 || way.dz) continue;
       const pts = this.resample(way.p, 8); if (pts.length < 2) continue;
+      if (way.u) {   // dirt streets inside the built-up area get the same raised concrete pavements (rural tracks stay open)
+        let urban = 0; for (let i = 0; i + 1 < pts.length; i++) if (w.buildingsNear((pts[i][0] + pts[i + 1][0]) / 2, (pts[i][1] + pts[i + 1][1]) / 2) >= 3) urban++;
+        if (urban < (pts.length - 1) * 0.5) continue;
+      }
       const sw = way.c <= 2 ? 2.6 : way.c <= 4 ? 2.1 : 1.6, hw = way.w / 2;
       const L: [number, number][][] = [[], []];
       for (let i = 0; i < pts.length; i++) {
@@ -102,7 +106,7 @@ export class StreetBuilder {
       for (let i = 0; i + 1 < pts.length; i++) {
         const mx = (pts[i][0] + pts[i + 1][0]) / 2, mz = (pts[i][1] + pts[i + 1][1]) / 2;
         if (!this.paved(mx, mz)) continue;
-        const useBrick = Math.hypot(mx + 750, mz + 210) < 1100;
+        const useBrick = false;   // concrete slabs everywhere, like the reference street
         const y0 = lift(way.c);
         for (const side of [0, 1]) {
           const n0 = L[side][i], n1 = L[side][i + 1];
@@ -121,6 +125,9 @@ export class StreetBuilder {
           { const lx = pts[i][0] + n0[0] * (hw + 0.05 + KERB_LIP), lz = pts[i][1] + n0[1] * (hw + 0.05 + KERB_LIP), mx2 = pts[i + 1][0] + n1[0] * (hw + 0.05 + KERB_LIP), mz2 = pts[i + 1][1] + n1[1] * (hw + 0.05 + KERB_LIP);
             const kb = this.buf(mx, mz, 'curb'), e = 0.002, l0 = kb.vert(ax, ya + H + e, az, 0, 1, 0, 0, 0, wh), l1 = kb.vert(bx, yb + H + e, bz, 0, 1, 0, 0, 0, wh), l2 = kb.vert(lx, w.calculateRawTerrainHeight(lx, lz) + y0 + H + e, lz, 0, 1, 0, 0, 0, wh), l3 = kb.vert(mx2, w.calculateRawTerrainHeight(mx2, mz2) + y0 + H + e, mz2, 0, 1, 0, 0, 0, wh);
             if (side === 0) { kb.tri(l0, l1, l2); kb.tri(l1, l3, l2); } else { kb.tri(l0, l2, l1); kb.tri(l1, l2, l3); } }
+          // outer edge: a clean concrete face down to the ground, so the slab reads as a raised pavement from the verge side too
+          { const gc = yc - y0 - 0.12, gd = yd - y0 - 0.12, o0 = tb.vert(cx, gc, cz, n0[0], 0, n0[1], cx, cz, wh), o1 = tb.vert(dx, gd, dz, n0[0], 0, n0[1], dx, dz, wh), o2 = tb.vert(dx, yd + H, dz, n0[0], 0, n0[1], dx, dz, wh), o3 = tb.vert(cx, yc + H, cz, n0[0], 0, n0[1], cx, cz, wh);
+            if (side === 0) { tb.tri(o0, o2, o1); tb.tri(o0, o3, o2); } else { tb.tri(o0, o1, o2); tb.tri(o0, o2, o3); } }
           // kerb face toward the road
           const cb = this.buf(mx, mz, 'curb'); const nxv = -n0[0], nzv = -n0[1];
           const k0 = cb.vert(ax, ya, az, nxv, 0, nzv, 0, 0, wh), k1 = cb.vert(bx, yb, bz, nxv, 0, nzv, 0, 0, wh), k2 = cb.vert(bx, yb + H, bz, nxv, 0, nzv, 0, 0, wh), k3 = cb.vert(ax, ya + H, az, nxv, 0, nzv, 0, 0, wh);
