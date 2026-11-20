@@ -212,7 +212,7 @@ Done and pushed on `ccr-cac88f1d-gkebu8` (see bullets above plus):
 ## v0.5.0
 - Paint shop: per-car body / accent / livery / wheel colour and finish (`services/paint.service.ts`, garage PAINT panel, Tuning > Visuals), saved in localStorage `shesha.paint`.
 
-## Since v0.5.0 (branch only, not released)
+## v0.6.0
 - Roads sunk ~20 cm with a per-tile road-mask boolean cut in the terrain shader (`world-builder.ts` bakeRoadMask, R = road SDF, G = building proximity); soil walls at road edges; concrete pavements + kerbstones everywhere in town.
 - Town ground: procedural site-plan paving (`town-ground.ts`).
 - Neon theme removed (settings theme fixed to REAL).
