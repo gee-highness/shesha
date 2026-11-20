@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { makeCar, CarKind } from './car-gen';
 import { CAR_CATALOG } from '../cars';
-import type { DynamicCollider } from '../physics/collision';
+import type { DynamicCollider, CarBody } from '../physics/collision';
 import type { PeerState } from '../../services/multiplayer.service';
 
 /** Which generated body stands in for a catalogue car on other players' screens (same shapes everywhere, so nothing extra to download). */
@@ -64,6 +64,13 @@ export class RemotePlayers {
   }
 
   /** Moving circles so remote cars are solid for the local player (3 per car along its heading). */
+  /** Other players' cars as oriented boxes (they are driven elsewhere, so they are not pushed here). */
+  bodies(): CarBody[] {
+    const out: CarBody[] = [];
+    for (const r of this.remotes.values()) { if (!r.group.visible) continue; const hd = this.tmp.set(0, 0, 1).applyQuaternion(r.group.quaternion), z = r.group.userData['size'] as { L: number; W: number };
+      out.push({ id: 3000 + r.id, x: r.group.position.x, z: r.group.position.z, yaw: Math.atan2(hd.x, hd.z), hl: z.L / 2, hw: z.W / 2, vx: r.vx, vz: r.vz, w: 0, mass: 1500 }); }
+    return out;
+  }
   colliders(): DynamicCollider[] {
     const out: DynamicCollider[] = [];
     for (const r of this.remotes.values()) {

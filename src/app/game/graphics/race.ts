@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import type { WorldBuilder } from './world-builder';
 import type { RoadGraph, Route, RouteStep } from '../road-graph';
-import type { DynamicCollider } from '../physics/collision';
+import type { DynamicCollider, CarBody } from '../physics/collision';
 import { makeCar, CarKind } from './car-gen';
 
 /** A street race: a chain of district snap points (meta.snaps keys) joined by the fastest roads. */
@@ -162,6 +162,11 @@ export class Race {
     const out: DynamicCollider[] = []; if (!this.active) return out;
     this.racers.forEach((r, i) => { for (const off of [-1.3, 0, 1.3]) out.push({ x: r.x + r.hd[0] * off, z: r.z + r.hd[1] * off, r: 1.0, vx: r.hd[0] * r.speed, vz: r.hd[1] * r.speed, mass: 1300, id: 2000 + i }); });
     return out;
+  }
+  /** Racers as oriented boxes for the player's collision solver. */
+  bodies(): CarBody[] {
+    if (!this.active) return [];
+    return this.racers.map((r, i) => { const z = r.obj.userData['size'] as { L: number; W: number }; return { id: 2000 + i, x: r.x, z: r.z, yaw: Math.atan2(r.hd[0], r.hd[1]), hl: z.L / 2, hw: z.W / 2, vx: r.hd[0] * r.speed, vz: r.hd[1] * r.speed, w: 0, mass: 1300 }; });
   }
   hit(id: number, impact: number): void { const r = this.racers[id - 2000]; if (r) r.speed = Math.max(0, r.speed - impact * 0.45); }
 

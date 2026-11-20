@@ -3,11 +3,12 @@ import { makeCar, PAINTS, CarKind } from './car-gen';
 import * as THREE from 'three';
 import { AssetLibrary } from './asset-library';
 import type { WorldBuilder } from './world-builder';
-import type { DynamicCollider } from '../physics/collision';
+import { type DynamicCollider, type CarBody, type CarHit, boxContact, carImpulse, yawInertia } from '../physics/collision';
 import type { TrafficSignals } from './traffic-signals';
 import type { RoadGraph } from '../road-graph';
 
-interface Agent { routed?: boolean; turn?: Float32Array; wT?: number; lift?: number; dzs: number[]; cruise: number; obj: THREE.Group; pts: number[]; seg: number; s: number; speed: number; w: number; cum: number[]; len: number; }
+interface Crash { x: number; z: number; yaw: number; vx: number; vz: number; w: number; t: number }
+interface Agent { crash?: Crash; routed?: boolean; turn?: Float32Array; wT?: number; lift?: number; dzs: number[]; cruise: number; obj: THREE.Group; pts: number[]; seg: number; s: number; speed: number; w: number; cum: number[]; len: number; }
 
 /** Ambient traffic that drives the real OSM road geometry, on the left (Eswatini). */
 export class RoadTraffic {
@@ -87,6 +88,7 @@ export class RoadTraffic {
   }
 
   private respawn(a: Agent, px: number, pz: number): void {
+    a.crash = undefined;
     if (this.routeSpawn(a, px, pz)) return; a.routed = false;
     for (let tries = 0; tries < 40; tries++) {
       const wi = this.candidates[Math.floor(Math.random() * this.candidates.length)];
@@ -126,7 +128,56 @@ export class RoadTraffic {
     return o.sort((p, q) => p.d - q.d).slice(0, k);
   }
   /** A collision shoved this car: lose speed in proportion to the hit. */
-  hit(id: number, impact: number): void { const a = this.agents[id]; if (a) a.speed = Math.max(0, a.speed - impact * 0.6); }
+  hit(id: number, impact: number): void { const a = this.agents[id]; if (a && !a.crash) a.speed = Math.max(0, a.speed - impact * 0.6); }
+
+  // ---------------- real crashes: a car that is hit leaves its lane and becomes a free rigid body until it comes to rest
+  private dims(a: Agent): { hl: number; hw: number; mass: number } {
+    const z = a.obj.userData['size'] as { L: number; W: number } | undefined, L = z?.L ?? 4.5, W = z?.W ?? 1.8;
+    return { hl: L / 2, hw: W / 2, mass: L > 9 ? 12000 : Math.max(950, Math.min(4500, 1150 + (L - 4.2) * 520 + (W - 1.75) * 900)) };
+  }
+  private body(a: Agent, id: number): CarBody {
+    const d = this.dims(a), c = a.crash;
+    if (c) return { id, x: c.x, z: c.z, yaw: c.yaw, hl: d.hl, hw: d.hw, vx: c.vx, vz: c.vz, w: c.w, mass: d.mass };
+    const hd = (a.obj.userData['hd'] as [number, number] | undefined) ?? [0, 1];
+    return { id, x: a.obj.position.x, z: a.obj.position.z, yaw: Math.atan2(hd[0], hd[1]), hl: d.hl, hw: d.hw, vx: hd[0] * a.speed, vz: hd[1] * a.speed, w: 0, mass: d.mass };
+  }
+  /** Every visible traffic car as an oriented box for the player's collision solver. */
+  bodies(): CarBody[] { const out: CarBody[] = []; this.agents.forEach((a, id) => { if (a.obj.visible && (a.pts.length || a.crash)) out.push(this.body(a, id)); }); return out; }
+  /** Apply an impulse from a collision: the car is knocked out of its lane and slides / spins on its tyres. */
+  applyHit(h: CarHit): void {
+    const a = this.agents[h.id]; if (!a) return;
+    const b = this.body(a, h.id);
+    if (!a.crash) a.crash = { x: b.x, z: b.z, yaw: b.yaw, vx: b.vx, vz: b.vz, w: 0, t: 0 };
+    const c = a.crash; c.x += h.sx; c.z += h.sz; c.vx += h.jx / b.mass; c.vz += h.jz / b.mass; c.w += ((h.pz - b.z) * h.jx - (h.px - b.x) * h.jz) / yawInertia(b); c.t = 0;
+  }
+  private crashStep(a: Agent, id: number, dt: number, px: number, pz: number): void {
+    const c = a.crash!, d = this.dims(a); c.t += dt;
+    const fx = Math.sin(c.yaw), fz = Math.cos(c.yaw), rx = fz, rz = -fx;
+    let vf = c.vx * fx + c.vz * fz, vl = c.vx * rx + c.vz * rz;
+    const step = (v: number, dec: number) => (Math.abs(v) <= dec ? 0 : v - Math.sign(v) * dec);
+    vl = step(vl, 7.5 * dt);                                     // tyres scrubbing sideways (~0.75 g)
+    vf = step(vf, (c.t > 0.4 ? 5.5 : 1.5) * dt);                 // the startled driver gets on the brakes
+    c.vx = fx * vf + rx * vl; c.vz = fz * vf + rz * vl;
+    c.w = step(c.w, (2.2 + Math.abs(vl) * 0.25) * dt) * Math.exp(-0.6 * dt);
+    c.x += c.vx * dt; c.z += c.vz * dt; c.yaw += c.w * dt;
+    const y = this.world.groundHeightAt(c.x, c.z, a.obj.position.y + 1) + (a.lift ?? 0.1) * 0;
+    const me: CarBody = { id, x: c.x, z: c.z, yaw: c.yaw, hl: d.hl, hw: d.hw, vx: c.vx, vz: c.vz, w: c.w, mass: d.mass };
+    this.world.collision.pushBody(me, y);                        // walls, poles, buildings
+    for (let j = 0; j < this.agents.length; j++) {               // chain reactions with the rest of the traffic
+      const o = this.agents[j]; if (o === a || !o.obj.visible || !(o.pts.length || o.crash)) continue;
+      if (Math.abs(o.obj.position.x - me.x) > 8 || Math.abs(o.obj.position.z - me.z) > 8) continue;
+      const ob = this.body(o, j), ct = boxContact(me, ob); if (!ct) continue;
+      const bx = ob.vx, bz = ob.vz, bw = ob.w; carImpulse(me, ob, ct, 0.15, 0.45);
+      me.x += ct.nx * ct.pen * 0.5; me.z += ct.nz * ct.pen * 0.5;
+      if (Math.hypot(ob.vx - bx, ob.vz - bz) + Math.abs(ob.w - bw) > 0.05) { if (!o.crash) o.crash = { x: ob.x, z: ob.z, yaw: ob.yaw, vx: bx, vz: bz, w: 0, t: 0 }; const oc = o.crash; oc.vx = ob.vx; oc.vz = ob.vz; oc.w = ob.w; oc.x -= ct.nx * ct.pen * 0.5; oc.z -= ct.nz * ct.pen * 0.5; }
+    }
+    c.x = me.x; c.z = me.z; c.vx = me.vx; c.vz = me.vz; c.w = me.w;
+    a.obj.position.set(c.x, y + (a.lift ?? 0.1), c.z); a.obj.quaternion.setFromAxisAngle(this.upV, c.yaw);
+    a.obj.userData['hd'] = [Math.sin(c.yaw), Math.cos(c.yaw)]; a.speed = Math.max(0, vf);
+    // back on its way once it has stopped and nobody is watching (or it slid far out of the world's way)
+    const still = Math.hypot(c.vx, c.vz) < 0.3 && Math.abs(c.w) < 0.1, far = Math.hypot(c.x - px, c.z - pz);
+    if ((still && c.t > 6 && far > 45) || far > 700 || c.t > 90) this.respawn(a, px, pz);
+  }
 
   update(dt: number, px: number, pz: number): void {
     this.timer += dt; this.proxN = 0;
@@ -139,6 +190,7 @@ export class RoadTraffic {
         if (!a.pts.length) { a.obj.visible = false; continue; }
       }
       if (!a.pts.length) { if (this.timer > 0.2) this.respawn(a, px, pz); continue; }
+      if (a.crash) { this.crashStep(a, ai, dt, px, pz); continue; }
       // yield: brake for the player (or anything) ahead in our lane, else return to cruising speed
       const hx = a.obj.position.x - px, hz = a.obj.position.z - pz;
       const hd = a.obj.userData['hd'] as [number, number] | undefined;

@@ -3,7 +3,46 @@ import type { RaycastVehicle } from './raycast-vehicle';
 
 /** A moving circle obstacle (AI car), with its own velocity and mass. */
 export interface DynamicCollider { x: number; z: number; r: number; vx: number; vz: number; mass: number; id: number }
-export interface CollisionResult { impactSpeed: number; hitKind: 'none' | 'static' | 'car'; hitId: number }
+export interface CollisionResult { impactSpeed: number; hitKind: 'none' | 'static' | 'car'; hitId: number; hits: CarHit[] }
+/** Another vehicle as an oriented box (centre, heading, half length / width), with its motion. */
+export interface CarBody { id: number; x: number; z: number; yaw: number; hl: number; hw: number; vx: number; vz: number; w: number; mass: number }
+/** Impulse (N s) the solver applied to another vehicle, and where (world x,z). */
+export interface CarHit { id: number; jx: number; jz: number; px: number; pz: number; speed: number; sx: number; sz: number }
+
+/** Separating-axis test for two oriented boxes. Normal points from B to A; contact = mean of the corners inside the other box. */
+export function boxContact(a: CarBody, b: CarBody): { nx: number; nz: number; pen: number; px: number; pz: number } | null {
+  const axes = [[Math.sin(a.yaw), Math.cos(a.yaw)], [Math.cos(a.yaw), -Math.sin(a.yaw)], [Math.sin(b.yaw), Math.cos(b.yaw)], [Math.cos(b.yaw), -Math.sin(b.yaw)]];
+  const ext = (o: CarBody, ax: number[]) => o.hl * Math.abs(ax[0] * Math.sin(o.yaw) + ax[1] * Math.cos(o.yaw)) + o.hw * Math.abs(ax[0] * Math.cos(o.yaw) - ax[1] * Math.sin(o.yaw));
+  const dx = a.x - b.x, dz = a.z - b.z; let best = 1e9, nx = 0, nz = 0;
+  for (const ax of axes) { const d = dx * ax[0] + dz * ax[1], o = ext(a, ax) + ext(b, ax) - Math.abs(d); if (o <= 0) return null; if (o < best) { best = o; const sg = d < 0 ? -1 : 1; nx = ax[0] * sg; nz = ax[1] * sg; } }
+  const corners = (o: CarBody) => { const fx = Math.sin(o.yaw), fz = Math.cos(o.yaw), rx = Math.cos(o.yaw), rz = -Math.sin(o.yaw); return [[1, 1], [1, -1], [-1, 1], [-1, -1]].map(([u, v]) => [o.x + fx * o.hl * u + rx * o.hw * v, o.z + fz * o.hl * u + rz * o.hw * v]); };
+  const inside = (o: CarBody, p: number[]) => { const qx = p[0] - o.x, qz = p[1] - o.z; return Math.abs(qx * Math.sin(o.yaw) + qz * Math.cos(o.yaw)) <= o.hl + 0.02 && Math.abs(qx * Math.cos(o.yaw) - qz * Math.sin(o.yaw)) <= o.hw + 0.02; };
+  let px = 0, pz = 0, n = 0;
+  for (const c of corners(a)) if (inside(b, c)) { px += c[0]; pz += c[1]; n++; }
+  for (const c of corners(b)) if (inside(a, c)) { px += c[0]; pz += c[1]; n++; }
+  if (!n) { px = (a.x + b.x) / 2; pz = (a.z + b.z) / 2; n = 1; }
+  return { nx, nz, pen: best, px: px / n, pz: pz / n };
+}
+/** Moment of inertia of a car body about its vertical axis (solid box). */
+export const yawInertia = (b: { mass: number; hl: number; hw: number }): number => (b.mass * (4 * b.hl * b.hl + 4 * b.hw * b.hw)) / 12;
+/**
+ * Equal-and-opposite impulse between two boxes at a contact (restitution e, Coulomb friction mu). Mutates both bodies' velocities and
+ * returns the normal impulse magnitude. Velocity of a body point = v + w x r with w = (0, w, 0): (w*rz, -w*rx).
+ */
+export function carImpulse(a: CarBody, b: CarBody, c: { nx: number; nz: number; px: number; pz: number }, e = 0.15, mu = 0.45): number {
+  const ia = 1 / a.mass, ib = 1 / b.mass, Ia = yawInertia(a), Ib = yawInertia(b);
+  const rax = c.px - a.x, raz = c.pz - a.z, rbx = c.px - b.x, rbz = c.pz - b.z;
+  const vx = a.vx + a.w * raz - (b.vx + b.w * rbz), vz = a.vz - a.w * rax - (b.vz - b.w * rbx);
+  const vn = vx * c.nx + vz * c.nz; if (vn >= 0) return 0;
+  const ran = raz * c.nx - rax * c.nz, rbn = rbz * c.nx - rbx * c.nz;
+  const j = (-(1 + e) * vn) / (ia + ib + (ran * ran) / Ia + (rbn * rbn) / Ib);
+  const push = (jx: number, jz: number) => { a.vx += jx * ia; a.vz += jz * ia; a.w += (raz * jx - rax * jz) / Ia; b.vx -= jx * ib; b.vz -= jz * ib; b.w -= (rbz * jx - rbx * jz) / Ib; };
+  push(c.nx * j, c.nz * j);
+  const tx = -c.nz, tz = c.nx, vt = vx * tx + vz * tz, rat = raz * tx - rax * tz, rbt = rbz * tx - rbx * tz;   // scraping friction along the contact
+  const jt = Math.max(-mu * j, Math.min(mu * j, -vt / (ia + ib + (rat * rat) / Ia + (rbt * rbt) / Ib)));
+  push(tx * jt, tz * jt);
+  return j;
+}
 
 /**
  * Static world collision (building footprints, tree trunks, poles) in a spatial hash, plus an impulse solver
@@ -124,6 +163,21 @@ export class CollisionWorld {
     return { x, z };
   }
 
+  /** Push a free-moving car body (crashed traffic) out of buildings, poles and walls; bounces its velocity off what it hit. */
+  pushBody(b: CarBody, y: number): number {
+    const c = { nx: 0, nz: 0, pen: 0 }, fx = Math.sin(b.yaw), fz = Math.cos(b.yaw), rad = b.hw; let hit = 0;
+    for (const off of [-(b.hl - rad), 0, b.hl - rad]) {
+      const cx = b.x + fx * off, cz = b.z + fz * off, gx = Math.floor(cx / this.CELL), gz = Math.floor(cz / this.CELL);
+      for (let a = -1; a <= 1; a++) for (let q = -1; q <= 1; q++) {
+        const key = this.key(gx + a, gz + q);
+        const one = (nx: number, nz: number, pen: number) => { b.x += nx * pen; b.z += nz * pen; const vn = b.vx * nx + b.vz * nz; if (vn < 0) { b.vx -= 1.2 * vn * nx; b.vz -= 1.2 * vn * nz; b.w *= 0.6; hit = Math.max(hit, -vn); } };
+        for (const i of this.polyGrid.get(key) ?? []) { if (y > this.polyY[i * 2 + 1] + (this.polyRoof[i] ? -0.6 : 1.3) || y < this.polyY[i * 2] - 1.3) continue; if (this.polyContact(i, cx, cz, rad, c)) one(c.nx, c.nz, c.pen); }
+        for (const i of this.circleGrid.get(key) ?? []) { if (y > this.circleY[i * 2 + 1] + 1.3 || y < this.circleY[i * 2] - 1.3) continue; const dx = cx - this.circles[i * 3], dz = cz - this.circles[i * 3 + 1], d = Math.hypot(dx, dz), need = rad + this.circles[i * 3 + 2]; if (d < need) one(dx / (d || 1), dz / (d || 1), need - d); }
+      }
+    }
+    return hit;
+  }
+
   /** True when the car's circle chain placed at (x,z,y) touches any solid or moving collider. */
   private touching(x: number, z: number, y: number, fx: number, fz: number, rad: number, L: number, count: number, dynamics: DynamicCollider[]): boolean {
     const c = { nx: 0, nz: 0, pen: 0 };
@@ -151,8 +205,8 @@ export class CollisionWorld {
    * Resolve the car against statics and moving colliders. Call once per physics step, after integration.
    * `prev` = where the car was before this step: the move is swept in <=0.3 m slices so a fast car can never skip through a thin wall or pole.
    */
-  resolve(v: RaycastVehicle, dynamics: DynamicCollider[] = [], dt = 1 / 60, prev?: { x: number; y: number; z: number }): CollisionResult {
-    const res: CollisionResult = { impactSpeed: 0, hitKind: 'none', hitId: -1 };
+  resolve(v: RaycastVehicle, dynamics: DynamicCollider[] = [], dt = 1 / 60, prev?: { x: number; y: number; z: number }, bodies: CarBody[] = []): CollisionResult {
+    const res: CollisionResult = { impactSpeed: 0, hitKind: 'none', hitId: -1, hits: [] };
     const L = v.config.wheelBaseM + 1.45, rad = Math.max(0.9, v.config.trackWidthM * 0.52);
     const count = Math.max(3, Math.round(L / (rad * 1.2)));
     const fwd = CollisionWorld._fwd.set(0, 0, 1).applyQuaternion(v.quaternion);
@@ -219,6 +273,24 @@ export class CollisionWorld {
           if (d < need) { const inv = 1 / Math.max(d, 1e-5); apply(cx, cz, dx * inv, dz * inv, need - d, o.vx, o.vz, o.mass, 'car', o.id); }
         }
       }
+    }
+    // ---- vehicle vs vehicle: oriented boxes, impulses shared by mass and inertia (the other car is pushed and spun too)
+    if (bodies.length) {
+      const fq = CollisionWorld._fwd.set(0, 0, 1).applyQuaternion(v.quaternion), yaw = Math.atan2(fq.x, fq.z);
+      const me: CarBody = { id: -1, x: v.position.x, z: v.position.z, yaw, hl: v.config.wheelBaseM / 2 + 0.95, hw: v.config.trackWidthM / 2 + 0.14, vx: v.velocity.x, vz: v.velocity.z, w: v.angularVelocity.y, mass: v.config.massKg };
+      for (const src of bodies) {
+        const o: CarBody = { ...src };   // work on a copy: the caller applies the returned impulse to its own car
+        if (Math.abs(o.x - me.x) > me.hl + o.hl + 2 || Math.abs(o.z - me.z) > me.hl + o.hl + 2) continue;
+        const ct = boxContact(me, o); if (!ct) continue;
+        const ia = 1 / me.mass, ib = 1 / o.mass, share = ia / (ia + ib), corr = Math.max(0, ct.pen - 0.01);
+        me.x += ct.nx * corr * share; me.z += ct.nz * corr * share;
+        const bx0 = o.vx, bz0 = o.vz, ow = o.w;
+        const relN = -((me.vx - o.vx) * ct.nx + (me.vz - o.vz) * ct.nz);
+        const j = carImpulse(me, o, ct, 0.15, 0.45);
+        void ow; res.hits.push({ id: o.id, jx: (o.vx - bx0) * o.mass, jz: (o.vz - bz0) * o.mass, px: ct.px, pz: ct.pz, speed: Math.max(0, relN), sx: -ct.nx * corr * (1 - share), sz: -ct.nz * corr * (1 - share) });
+        if (j > 0 && relN > res.impactSpeed) { res.impactSpeed = relN; res.hitKind = 'car'; res.hitId = o.id; }
+      }
+      v.position.x = me.x; v.position.z = me.z; v.velocity.x = me.vx; v.velocity.z = me.vz; v.angularVelocity.y = me.w;
     }
     void dt;
     return res;
