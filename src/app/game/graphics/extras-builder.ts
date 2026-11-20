@@ -355,14 +355,14 @@ export class ExtrasBuilder {
       const y = w.calculateRawTerrainHeight(v.p[0], v.p[1]); s.position.set(v.p[0], y + 26, v.p[1]);
       w.landmarksGroup.add(s); w.registerChunk(s, v.p[0], v.p[1], 0, 1400);
       const b = this.buf(v.p[0], v.p[1], 'props');
-      this.box(b, v.p[0], y, v.p[1], 0.25, 0.25, 22, 1, 0, [0.13, 0.83, 0.93]); // a tall cyan marker pole you can spot from the road
+      this.box(b, v.p[0], y, v.p[1], 0.25, 0.25, 22, 1, 0, [0.9, 0.9, 0.88]); // a tall white marker pole you can spot from the road
     }
   }
 
   // ------------------------------------------------------------------ markets and bus ranks
   /** Manzini Market stalls (brick counters under green tin canopies, yellow umbrellas) and the long green-and-yellow bus rank shelters. */
   private marketsAndRanks(): void {
-    const w = this.w, green = [0.1, 0.42, 0.24], yellow = [0.95, 0.78, 0.14], brick = [0.72, 0.4, 0.3], post = [0.16, 0.3, 0.2], neon = [0.13, 0.83, 0.93];
+    const w = this.w, green = [0.1, 0.42, 0.24], yellow = [0.95, 0.78, 0.14], brick = [0.72, 0.4, 0.3], post = [0.16, 0.3, 0.2], neon = [1.0, 0.94, 0.82];   // warm-white LED strip (was neon cyan)
     const free = (x: number, z: number): boolean => !w.roadAt(x, z) && !w.nearBuilding(x, z);
     for (const p of w.meta.pois ?? []) {
       if (p.k !== 'marketplace' && p.k !== 'bus_station') continue;
@@ -426,7 +426,7 @@ export class ExtrasBuilder {
     grp.add(ring(11, 14, 0, PI, 2.4, 0x1f2fa8));                       // royal-blue arch
     grp.add(ring(13.2, 14.6, PI * 0.31, PI * 0.69, 2.8, 0xc9ced6));    // brushed-silver crown
     grp.add(ring(10.5, 11.2, PI * 0.2, PI * 0.8, 2.6, 0xb81d24));      // red inner band
-    grp.add(ring(14.6, 14.85, 0, PI, 0.5, 0x22d3ee, 2.2));             // light-strip edge
+    grp.add(ring(14.6, 14.85, 0, PI, 0.5, 0xc8ccd2, 0));               // brushed-steel edge
     for (const sx of [-1, 1]) {
       const foot = new THREE.Mesh(new THREE.BoxGeometry(4.2, 5, 3.4), new THREE.MeshStandardMaterial({ color: 0x9aa0a8, roughness: 0.6, metalness: 0.3, flatShading: true })); foot.position.set(sx * 12.5, 2.5, 0); grp.add(foot);
       const plinth = new THREE.Mesh(new THREE.BoxGeometry(6, 2.2, 3), new THREE.MeshStandardMaterial({ color: 0x8f2f2a, roughness: 0.8, flatShading: true })); plinth.position.set(sx * 19, 1.1, 1.5); grp.add(plinth);   // brick statue plinths

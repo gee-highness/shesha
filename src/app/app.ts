@@ -570,7 +570,6 @@ export class App implements AfterViewInit, OnDestroy {
 
     if (event.code === 'KeyY') { try { localStorage.setItem('shesha.style', localStorage.getItem('shesha.style') === '1' ? '0' : '1'); } catch { /* ignore */ } location.reload(); return; }
     if (event.code === 'KeyF') { this.hudComponent?.showFps.update((v) => !v); return; }
-    if (event.code === 'KeyY') { this.settings.toggleTheme(); return; }
     if (event.code === 'KeyQ') { this.settings.cycleQuality(); return; }
     if (event.code === 'KeyG') { this.envService.cycleWeather(); return; }
     if (event.code === 'KeyH') { this.hapticsService.setEnabled(!this.hapticsService.enabled()); return; }

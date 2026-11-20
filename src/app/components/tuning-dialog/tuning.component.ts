@@ -315,36 +315,6 @@ import { ARCHETYPES, TuningService } from '../../services/tuning.service';
               </div>
             </div>
 
-            <!-- Underglow Neon -->
-            <div class="bg-zinc-900/60 p-4 rounded-2xl border border-zinc-800 flex flex-col justify-between">
-              <div>
-                <div class="flex items-center justify-between mb-2">
-                  <span class="text-xs font-bold text-zinc-300">Underglow Neon</span>
-                  <input
-                    type="checkbox"
-                    [checked]="tuningService.visuals().underglowEnabled"
-                    (change)="toggleUnderglow($event)"
-                    class="w-4 h-4 accent-cyan-400 cursor-pointer"
-                  />
-                </div>
-                <p class="text-[11px] text-zinc-500 mb-4">Emissive ground illumination beneath chassis</p>
-              </div>
-
-              <div class="flex items-center gap-3">
-                @for (color of ['#06b6d4', '#ec4899', '#a855f7', '#22c55e', '#facc15']; track color) {
-                  <button
-                    (click)="tuningService.updateVisuals({ underglowColor: color })"
-                    class="w-8 h-8 rounded-full border-2 transition-transform hover:scale-110 cursor-pointer flex items-center justify-center"
-                    [style.background-color]="color"
-                    [attr.aria-label]="'Underglow color ' + color"
-                    [class.border-white]="tuningService.visuals().underglowColor === color"
-                    [class.border-transparent]="tuningService.visuals().underglowColor !== color"
-                  >
-                    <span class="sr-only">{{ color }}</span>
-                  </button>
-                }
-              </div>
-            </div>
           </div>
         }
       </div>
