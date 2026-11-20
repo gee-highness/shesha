@@ -46,8 +46,8 @@ vec4 townGround(vec2 wp, vec2 p, vec3 base, float fw, float bld){
   float soft = smoothstep(0.25, 0.7, green);
   // ---- 3. forecourts
   float apron = smoothstep(0.55, 0.95, bld), yard = smoothstep(0.15, 0.6, bld);
-  float hard = max(apron, max(town, ind) * max(1.0 - soft, 0.0) * mix(0.55, 1.0, yard));
-  hard = max(hard, yard * 0.6 * (1.0 - soft));
+  float hard = max(apron, max(town * mix(0.3, 0.9, yard), ind) * max(1.0 - soft, 0.0));   // homes keep their yards; industry is paved
+  hard = max(hard, yard * 0.5 * (1.0 - soft));
   if (hard < 0.02) return vec4(base, 0.0);
   // ---- 4. plots (warped edges) and their surface spec
   float plot = ind > 0.5 ? 48.0 : 24.0;
@@ -56,7 +56,7 @@ vec4 townGround(vec2 wp, vec2 p, vec3 base, float fw, float bld){
   vec2 lf = fract(pw / plot); float ledge = min(min(lf.x, 1.0 - lf.x), min(lf.y, 1.0 - lf.y)) * plot;
   float plotLine = (1.0 - smoothstep(0.05, 0.12 + fw, ledge)) * clamp(1.0 - fw * 3.0, 0.0, 1.0);
   float aaF = clamp(1.0 - fw * 5.0, 0.0, 1.0);
-  vec3 cementWarm = vec3(0.70, 0.67, 0.61), cementCool = vec3(0.62, 0.64, 0.66);
+  vec3 cementWarm = vec3(0.56, 0.53, 0.48), cementCool = vec3(0.49, 0.5, 0.52);
   vec3 cem = mix(cementCool, cementWarm, lh2) * mix(1.06, 0.84, lage);           // tint and age per plot
   vec3 col; float seam = 0.0, unit = 0.5;
   float kind;
