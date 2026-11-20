@@ -1,7 +1,8 @@
 import * as THREE from 'three';
 import type { WorldBuilder } from './world-builder';
+import { PedAvatars } from './ped-avatars';
 
-interface Ped { pts: number[]; cum: number[]; len: number; s: number; dir: number; speed: number; off: number; side: number; phase: number; dodge: number; active: boolean; x: number; z: number; yaw: number; }
+interface Ped { pts: number[]; cum: number[]; len: number; s: number; dir: number; speed: number; off: number; side: number; phase: number; dodge: number; active: boolean; y: number; sw: number; bob: number; x: number; z: number; yaw: number; }
 
 /** Pedestrians strolling the kerbside pavements near the player. Three instanced meshes (torso+head, two legs) = 3 draw calls. */
 export class Pedestrians {
@@ -11,8 +12,10 @@ export class Pedestrians {
   private m = new THREE.Matrix4(); private q = new THREE.Quaternion(); private e = new THREE.Euler(); private v = new THREE.Vector3(); private one = new THREE.Vector3(1, 1, 1);
   private static SHIRTS = [0xd9534f, 0x3b6ea5, 0xf0c05a, 0x4f9d69, 0xeeeeee, 0x8a4fa5, 0xe08a3c, 0x222222];
 
+  private avatars: PedAvatars;
   constructor(scene: THREE.Scene, private world: WorldBuilder, count = 48) {
     this.count = count;
+    this.avatars = new PedAvatars(scene, /Android|iPhone|iPad|Mobile/i.test(navigator.userAgent) ? 4 : 8); void this.avatars.load();
     const body = new THREE.BoxGeometry(0.42, 0.62, 0.26).translate(0, 1.18, 0);
     const head = new THREE.SphereGeometry(0.13, 7, 6).translate(0, 1.64, 0);
     const torsoGeo = mergeSimple([body, head]);
@@ -23,7 +26,7 @@ export class Pedestrians {
     this.legR = new THREE.InstancedMesh(leg, this.legL.material, count);
     for (const im of [this.torso, this.legL, this.legR]) { im.frustumCulled = false; im.count = 0; scene.add(im); }
     for (let i = 0; i < count; i++) this.torso.setColorAt(i, new THREE.Color(Pedestrians.SHIRTS[i % Pedestrians.SHIRTS.length]));
-    for (let i = 0; i < count; i++) this.peds.push({ pts: [], cum: [], len: 0, s: 0, dir: 1, speed: 1.3, off: 3, side: 1, phase: Math.random() * 6, dodge: 0, active: false, x: 0, z: 0, yaw: 0 });
+    for (let i = 0; i < count; i++) this.peds.push({ pts: [], cum: [], len: 0, s: 0, dir: 1, speed: 1.3, off: 3, side: 1, phase: Math.random() * 6, dodge: 0, active: false, y: 0, sw: 0, bob: 0, x: 0, z: 0, yaw: 0 });
   }
 
   /** Debug: active pedestrian positions. */
@@ -58,7 +61,7 @@ export class Pedestrians {
   /** Call every frame with the player's car position, velocity (m/s). */
   update(dt: number, px: number, pz: number, vx: number, vz: number): void {
     this.timer += dt; const spawnNow = this.timer > 0.25; if (spawnNow) this.timer = 0;
-    const speed = Math.hypot(vx, vz); let n = 0, spawned = 0;
+    const speed = Math.hypot(vx, vz); let n = 0, spawned = 0; const near: { id: number; x: number; y: number; z: number; yaw: number; phase: number; amount: number; d: number }[] = [];
     const slots = Math.min(this.count, this.peds.length);
     for (let i = 0; i < slots; i++) {
       const p = this.peds[i];
@@ -74,6 +77,13 @@ export class Pedestrians {
       p.x = x; p.z = z; p.yaw = Math.atan2(tx * p.dir, tz * p.dir);
       const y = this.world.groundHeightAt(x, z, 1e3);
       p.phase += dt * p.speed * (1 + p.dodge) * 5.2; const sw = Math.sin(p.phase), bob = Math.abs(Math.cos(p.phase)) * 0.035;
+      if (d < 45) near.push({ id: i, x, y, z, yaw: p.yaw, phase: p.phase, amount: Math.min(1, 0.75 + p.dodge * 0.4), d });
+      p.y = y; p.sw = sw; p.bob = bob;
+    }
+    // V-Me characters for the nearest people, simple figures for the rest
+    near.sort((a, b) => a.d - b.d); const drawn = this.avatars.place(near.slice(0, this.avatars.size));
+    for (let i = 0; i < slots; i++) {
+      const p = this.peds[i]; if (!p.active || drawn.has(i)) continue; const { x, z, sw, bob } = p, y = p.y;
       this.q.setFromEuler(this.e.set(0, p.yaw, 0));
       this.torso.setMatrixAt(n, this.m.compose(this.v.set(x, y + bob, z), this.q, this.one));
       const hip = (side: number) => this.m.compose(this.v.set(x + Math.cos(p.yaw) * 0.11 * side, y + 0.86 + bob, z - Math.sin(p.yaw) * 0.11 * side), new THREE.Quaternion().setFromEuler(this.e.set(sw * 0.7 * -side, p.yaw, 0, 'YXZ')), this.one);

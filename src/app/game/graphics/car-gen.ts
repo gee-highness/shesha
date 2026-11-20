@@ -161,14 +161,23 @@ class Dress {
 
 /** The lofted shell, coloured per band (rocker, doors, shoulder, glass, pillars, roof) with the livery applied. */
 function loft(s: Spec, col: number[], d: Dress, liv?: Liv): void {
-  const zs = new Set<number>(); const N = d.lite ? (s.L > 8 ? 14 : 9) : s.L > 8 ? 40 : s.L > 5.5 ? 34 : 28;
+  const zs = new Set<number>(); const N = d.lite ? (s.L > 8 ? 14 : 9) : s.L > 8 ? 60 : s.L > 5.5 ? 52 : 46;
   for (let i = 0; i <= N; i++) zs.add(Math.round((-s.L / 2 + (s.L * i) / N) * 1000) / 1000);
   for (const p of s.prof) zs.add(p[0]); if (!d.lite) for (const gl of s.glass) { zs.add(gl[0]); zs.add(gl[1]); } for (const a of axles(s)) { const R = (a < 0 ? (s.wrR ?? s.wr) : s.wr) * 1.13, n = d.lite ? 4 : 10; for (let k = 0; k <= n; k++) zs.add(Math.round((a - R + (2 * R * k) / n) * 1000) / 1000); zs.add(a - R - 0.03); zs.add(a + R + 0.03); }
   if (s.bed) { zs.add(s.bed[0]); zs.add(s.bed[1]); }
   if (liv?.t === 'blocks') for (let z = -s.L / 2; z < s.L / 2; z += 0.45) zs.add(Math.round(z * 1000) / 1000);
-  const Z = [...zs].filter((z) => z >= -s.L / 2 - 1e-6 && z <= s.L / 2 + 1e-6).sort((a, b) => a - b);
+  let Z = [...zs].filter((z) => z >= -s.L / 2 - 1e-6 && z <= s.L / 2 + 1e-6).sort((a, b) => a - b);
+  if (!d.lite) Z = [-s.L / 2 - 0.055, -s.L / 2 - 0.03, ...Z, s.L / 2 + 0.03, s.L / 2 + 0.055];   // rounded bumpers: the shell wraps round the nose and tail
+  // smooth sections: every half-section is refined with 4-point subdivision (11 -> 21 points), so curves read as curves
+  const H2 = d.lite ? HALF : HALF * 2 - 1, RING = H2 * 2 + 1;
+  const section = (z: number): [number, number][] => {
+    const over = Math.abs(z) - s.L / 2, zc = Math.max(-s.L / 2, Math.min(s.L / 2, z)); let h = half(s, zc);
+    if (!d.lite) { const r: [number, number][] = []; for (let j = 0; j < h.length; j++) { r.push(h[j]); if (j + 1 < h.length) { const a = h[Math.max(0, j - 1)], b = h[j], c = h[j + 1], e = h[Math.min(h.length - 1, j + 2)]; r.push([(-a[0] + 9 * b[0] + 9 * c[0] - e[0]) / 16, (-a[1] + 9 * b[1] + 9 * c[1] - e[1]) / 16]); } } h = r; }
+    if (over > 0) { let cy = 0; for (const p of h) cy += p[1]; cy /= h.length; const k = over < 0.04 ? 0.94 : 0.78; h = h.map(([x, y]) => [x * k, cy + (y - cy) * k] as [number, number]); }
+    return h;
+  };
   const pos: number[] = [], idx: number[] = [], triCol: number[][] = [];
-  for (const z of Z) { const h = half(s, z); for (let j = 0; j < HALF; j++) pos.push(-h[j][0], h[j][1], z); pos.push(0, h[HALF - 1][1] + (h[HALF - 1][1] > s.belt + 0.1 ? 0.012 : 0.006), z); for (let j = HALF - 1; j >= 0; j--) pos.push(h[j][0], h[j][1], z); }
+  for (const z of Z) { const h = section(z), HALF = h.length; for (let j = 0; j < HALF; j++) pos.push(-h[j][0], h[j][1], z); pos.push(0, h[HALF - 1][1] + (h[HALF - 1][1] > s.belt + 0.1 ? 0.012 : 0.006), z); for (let j = HALF - 1; j >= 0; j--) pos.push(h[j][0], h[j][1], z); }
   const roofC = s.roof ?? col, pillarC = s.blackPillar ? GBLACK : roofC;
   for (let i = 0; i + 1 < Z.length; i++) {
     const zm = (Z[i] + Z[i + 1]) / 2, top = profY(s, zm), cabin = top > s.belt + 0.12, slope = Math.abs(profY(s, Z[i + 1]) - profY(s, Z[i])) / Math.max(0.01, Z[i + 1] - Z[i]);
@@ -176,7 +185,7 @@ function loft(s: Spec, col: number[], d: Dress, liv?: Liv): void {
     const bed = !!s.bed && zm > s.bed[0] && zm < s.bed[1];
     for (let j = 0; j + 1 < RING; j++) {
       const a = i * RING + j, b = a + 1, c = a + RING, e = c + 1; idx.push(a, c, b, b, c, e);
-      const k = j < HALF ? j : RING - 2 - j, right = j >= HALF;
+      const kk = j < H2 ? j : RING - 2 - j, k = d.lite ? kk : kk >> 1, right = j >= H2;
       let q = col;
       if (k === 0) q = DARK;
       else if (k === 1 && (s.kit === 'sport' || s.kit === 'gt' || s.kit === 'hyper' || s.kit === 'off' || s.kit === 'trophy')) q = s.kit === 'off' || s.kit === 'trophy' ? GUN : CARBON;
@@ -189,7 +198,7 @@ function loft(s: Spec, col: number[], d: Dress, liv?: Liv): void {
         const L = liv;
         if (L.t === 'stripe' && k === 3) q = L.c1;
         else if (L.t === 'side' && (k === 2 || k === 3) && zm > s.ax[0] + 0.5 && zm < s.ax[1] - 0.4) q = k === 2 ? L.c1 : col;
-        else if (L.t === 'checker' && k === 3) q = (i + (right ? 1 : 0)) % 2 ? L.c1 : (L.c2 ?? col);
+        else if (L.t === 'checker' && k === 3) q = (Math.floor((zm + 10) / 0.22) + (right ? 1 : 0)) % 2 ? L.c1 : (L.c2 ?? col);
         else if (L.t === 'blocks' && (k === 2 || k === 3)) q = (Math.floor((zm + 10) / 0.45) + k) % 2 ? L.c1 : (L.c2 ?? WHITE);
         else if (L.t === 'racing' && k >= 9) q = L.c1;
         else if (L.t === 'twin' && k === 9) q = L.c1;
@@ -217,7 +226,7 @@ function loft(s: Spec, col: number[], d: Dress, liv?: Liv): void {
 // ---------------------------------------------------------------- dressing: lamps, grilles, aero, kit, cargo
 function dress(s: Spec, col: number[], d: Dress, kind: CarKind, liv?: Liv): void {
   const f = s.L / 2, hw = s.W / 2, lite = d.lite;
-  const noseY = (z: number): number => profY(s, z), front = f - 0.02, rear = -f + 0.02;
+  const noseY = (z: number): number => profY(s, z), front = lite ? f - 0.02 : f + 0.035, rear = lite ? -f + 0.02 : -f - 0.035;
   const nTop = noseY(f - 0.06), cabOver = s.H > 2.6 && !!s.cargo;
   const lampY = Math.max(s.sill + 0.22, Math.min(nTop - (cabOver ? 0.55 : 0.09), s.belt - (s.H > 2 ? 0.25 : 0.1)));
   const fw = (s.W / 2) * planK(s, f), rw = (s.W / 2) * planK(s, -f);
