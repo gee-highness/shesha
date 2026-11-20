@@ -11,8 +11,9 @@ export class SettingsService {
     try { const v = localStorage.getItem('shesha.quality') as QualityTier | null; if (v && ORDER.includes(v)) return v; } catch { /* private mode */ }
     return 'AUTO';
   }
-  readonly theme = signal<'REAL' | 'NEO'>((() => { try { return localStorage.getItem('shesha.theme') === 'REAL' ? 'REAL' : 'NEO'; } catch { return 'NEO'; } })());
-  toggleTheme(): void { const t = this.theme() === 'NEO' ? 'REAL' : 'NEO'; this.theme.set(t); try { localStorage.setItem('shesha.theme', t); } catch { /* private mode */ } }
+  /** The neon 'Neo-Eswatini' theme is retired: the city is always rendered as it really looks. */
+  readonly theme = signal<'REAL' | 'NEO'>('REAL');
+  toggleTheme(): void { /* retired */ }
   setQuality(q: QualityTier): void { this.quality.set(q); try { localStorage.setItem('shesha.quality', q); } catch { /* private mode */ } }
   cycleQuality(): void { this.setQuality(ORDER[(ORDER.indexOf(this.quality()) + 1) % ORDER.length]); }
 }

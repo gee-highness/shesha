@@ -118,10 +118,6 @@ import { WorldPipelineService } from '../../services/world-pipeline.service';
           <mat-icon class="!text-[22px]" [class.text-amber-300]="race.phase() === 'IDLE'" [class.text-red-400]="race.phase() !== 'IDLE'">sports_score</mat-icon>
           <span class="rail-tip">{{ race.phase() === 'IDLE' ? 'Races' : 'Abandon race' }} <kbd>N</kbd></span>
         </button>
-        <button (click)="settings.toggleTheme()" class="rail-btn group" aria-label="Neo-Eswatini theme">
-          <mat-icon class="!text-[22px]" [class.text-fuchsia-300]="settings.theme() === 'NEO'" [class.text-zinc-400]="settings.theme() !== 'NEO'">auto_awesome</mat-icon>
-          <span class="rail-tip">Neo-Eswatini {{ settings.theme() === 'NEO' ? 'on' : 'off' }} <kbd>Y</kbd></span>
-        </button>
         <button (click)="settings.cycleQuality()" class="rail-btn group" aria-label="Graphics quality">
           <mat-icon class="!text-[22px] text-amber-300">tune</mat-icon>
           <span class="rail-tip">Quality: {{ settings.quality() }} <kbd>Q</kbd></span>

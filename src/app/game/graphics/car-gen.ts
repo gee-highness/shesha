@@ -78,8 +78,8 @@ const SPECS: Record<CarKind, Spec> = {
 };
 
 /** Paint colours weighted like a real Southern African car park: mostly white, silver and grey, plus a few bold ones. */
-export const PAINTS: number[][] = [[0.95, 0.97, 1.0], [0.95, 0.97, 1.0], [0.95, 0.97, 1.0], [0.7, 0.76, 0.84], [0.7, 0.76, 0.84], [0.2, 0.24, 0.32], [0.2, 0.24, 0.32],
-  [0.03, 0.04, 0.07], [0.04, 0.45, 0.62], [0.08, 0.14, 0.55], [0.48, 0.12, 0.75], [0.8, 0.08, 0.5], [0.05, 0.6, 0.5], [0.9, 0.35, 0.1], [0.85, 0.87, 0.92]];
+export const PAINTS: number[][] = [[0.86, 0.86, 0.85], [0.86, 0.86, 0.85], [0.86, 0.86, 0.85], [0.55, 0.57, 0.6], [0.55, 0.57, 0.6], [0.22, 0.23, 0.25], [0.22, 0.23, 0.25],
+  [0.02, 0.02, 0.025], [0.05, 0.1, 0.25], [0.35, 0.04, 0.05], [0.6, 0.06, 0.05], [0.06, 0.18, 0.12], [0.55, 0.5, 0.42], [0.08, 0.12, 0.2], [0.75, 0.73, 0.68]];   // real car park: white, silver, grey, black, navy, maroon, red, bottle green, champagne
 
 // ---------------------------------------------------------------- shape helpers
 const profY = (s: Spec, z: number): number => {
@@ -113,12 +113,22 @@ const tyreW = (s: Spec, r: number): number => s.tw ?? (s.kit === 'gt' || s.kit =
 
 // ---------------------------------------------------------------- geometry builders
 type Buckets = THREE.BufferGeometry[][];
+/** Polished alloy colours (wheel faces) registered by the wheel builder. */
+const ALLOY = new WeakSet<number[]>();
+/**
+ * Surface type of a colour, read by the vehicle shader (one draw call, many real materials):
+ * 0 paint (clear-coated, metallic flake) · 1 glass · 2 chrome · 3 gloss-black trim · 4 matte rubber / plastic · 5 carbon fibre
+ * 6 tyre rubber · 7 brushed / cast metal · 8 plate / vinyl · 9 polished alloy
+ */
+function surfOf(c: number[]): number {
+  return c === GLASS ? 1 : c === CHROME ? 2 : c === GBLACK ? 3 : c === DARK ? 4 : c === CARBON ? 5 : c === TYRE ? 6 : c === STEEL || c === GUN ? 7 : c === PLATE ? 8 : ALLOY.has(c) ? 9 : 0;
+}
 function paint(g: THREE.BufferGeometry, c: number[]): THREE.BufferGeometry {
   if (g.index) { const n = g.toNonIndexed(); g.dispose(); g = n; }
   for (const k of Object.keys(g.attributes)) if (k !== 'position' && k !== 'normal') g.deleteAttribute(k);
-  const n = g.attributes['position'].count, a = new Float32Array(n * 3);
+  const n = g.attributes['position'].count, a = new Float32Array(n * 3), sf = new Float32Array(n).fill(surfOf(c));
   for (let i = 0; i < n; i++) { a[i * 3] = c[0]; a[i * 3 + 1] = c[1]; a[i * 3 + 2] = c[2]; }
-  g.setAttribute('color', new THREE.BufferAttribute(a, 3)); return g;
+  g.setAttribute('color', new THREE.BufferAttribute(a, 3)); g.setAttribute('surf', new THREE.BufferAttribute(sf, 1)); return g;
 }
 /** Turn a surface inside out (render its inner faces). */
 function flip(g: THREE.BufferGeometry): THREE.BufferGeometry {
@@ -151,14 +161,23 @@ class Dress {
 
 /** The lofted shell, coloured per band (rocker, doors, shoulder, glass, pillars, roof) with the livery applied. */
 function loft(s: Spec, col: number[], d: Dress, liv?: Liv): void {
-  const zs = new Set<number>(); const N = d.lite ? (s.L > 8 ? 14 : 9) : s.L > 8 ? 40 : s.L > 5.5 ? 34 : 28;
+  const zs = new Set<number>(); const N = d.lite ? (s.L > 8 ? 14 : 9) : s.L > 8 ? 60 : s.L > 5.5 ? 52 : 46;
   for (let i = 0; i <= N; i++) zs.add(Math.round((-s.L / 2 + (s.L * i) / N) * 1000) / 1000);
   for (const p of s.prof) zs.add(p[0]); if (!d.lite) for (const gl of s.glass) { zs.add(gl[0]); zs.add(gl[1]); } for (const a of axles(s)) { const R = (a < 0 ? (s.wrR ?? s.wr) : s.wr) * 1.13, n = d.lite ? 4 : 10; for (let k = 0; k <= n; k++) zs.add(Math.round((a - R + (2 * R * k) / n) * 1000) / 1000); zs.add(a - R - 0.03); zs.add(a + R + 0.03); }
   if (s.bed) { zs.add(s.bed[0]); zs.add(s.bed[1]); }
   if (liv?.t === 'blocks') for (let z = -s.L / 2; z < s.L / 2; z += 0.45) zs.add(Math.round(z * 1000) / 1000);
-  const Z = [...zs].filter((z) => z >= -s.L / 2 - 1e-6 && z <= s.L / 2 + 1e-6).sort((a, b) => a - b);
+  let Z = [...zs].filter((z) => z >= -s.L / 2 - 1e-6 && z <= s.L / 2 + 1e-6).sort((a, b) => a - b);
+  if (!d.lite) Z = [-s.L / 2 - 0.055, -s.L / 2 - 0.03, ...Z, s.L / 2 + 0.03, s.L / 2 + 0.055];   // rounded bumpers: the shell wraps round the nose and tail
+  // smooth sections: every half-section is refined with 4-point subdivision (11 -> 21 points), so curves read as curves
+  const H2 = d.lite ? HALF : HALF * 2 - 1, RING = H2 * 2 + 1;
+  const section = (z: number): [number, number][] => {
+    const over = Math.abs(z) - s.L / 2, zc = Math.max(-s.L / 2, Math.min(s.L / 2, z)); let h = half(s, zc);
+    if (!d.lite) { const r: [number, number][] = []; for (let j = 0; j < h.length; j++) { r.push(h[j]); if (j + 1 < h.length) { const a = h[Math.max(0, j - 1)], b = h[j], c = h[j + 1], e = h[Math.min(h.length - 1, j + 2)]; r.push([(-a[0] + 9 * b[0] + 9 * c[0] - e[0]) / 16, (-a[1] + 9 * b[1] + 9 * c[1] - e[1]) / 16]); } } h = r; }
+    if (over > 0) { let cy = 0; for (const p of h) cy += p[1]; cy /= h.length; const k = over < 0.04 ? 0.94 : 0.78; h = h.map(([x, y]) => [x * k, cy + (y - cy) * k] as [number, number]); }
+    return h;
+  };
   const pos: number[] = [], idx: number[] = [], triCol: number[][] = [];
-  for (const z of Z) { const h = half(s, z); for (let j = 0; j < HALF; j++) pos.push(-h[j][0], h[j][1], z); pos.push(0, h[HALF - 1][1] + (h[HALF - 1][1] > s.belt + 0.1 ? 0.012 : 0.006), z); for (let j = HALF - 1; j >= 0; j--) pos.push(h[j][0], h[j][1], z); }
+  for (const z of Z) { const h = section(z), HALF = h.length; for (let j = 0; j < HALF; j++) pos.push(-h[j][0], h[j][1], z); pos.push(0, h[HALF - 1][1] + (h[HALF - 1][1] > s.belt + 0.1 ? 0.012 : 0.006), z); for (let j = HALF - 1; j >= 0; j--) pos.push(h[j][0], h[j][1], z); }
   const roofC = s.roof ?? col, pillarC = s.blackPillar ? GBLACK : roofC;
   for (let i = 0; i + 1 < Z.length; i++) {
     const zm = (Z[i] + Z[i + 1]) / 2, top = profY(s, zm), cabin = top > s.belt + 0.12, slope = Math.abs(profY(s, Z[i + 1]) - profY(s, Z[i])) / Math.max(0.01, Z[i + 1] - Z[i]);
@@ -166,7 +185,7 @@ function loft(s: Spec, col: number[], d: Dress, liv?: Liv): void {
     const bed = !!s.bed && zm > s.bed[0] && zm < s.bed[1];
     for (let j = 0; j + 1 < RING; j++) {
       const a = i * RING + j, b = a + 1, c = a + RING, e = c + 1; idx.push(a, c, b, b, c, e);
-      const k = j < HALF ? j : RING - 2 - j, right = j >= HALF;
+      const kk = j < H2 ? j : RING - 2 - j, k = d.lite ? kk : kk >> 1, right = j >= H2;
       let q = col;
       if (k === 0) q = DARK;
       else if (k === 1 && (s.kit === 'sport' || s.kit === 'gt' || s.kit === 'hyper' || s.kit === 'off' || s.kit === 'trophy')) q = s.kit === 'off' || s.kit === 'trophy' ? GUN : CARBON;
@@ -179,7 +198,7 @@ function loft(s: Spec, col: number[], d: Dress, liv?: Liv): void {
         const L = liv;
         if (L.t === 'stripe' && k === 3) q = L.c1;
         else if (L.t === 'side' && (k === 2 || k === 3) && zm > s.ax[0] + 0.5 && zm < s.ax[1] - 0.4) q = k === 2 ? L.c1 : col;
-        else if (L.t === 'checker' && k === 3) q = (i + (right ? 1 : 0)) % 2 ? L.c1 : (L.c2 ?? col);
+        else if (L.t === 'checker' && k === 3) q = (Math.floor((zm + 10) / 0.22) + (right ? 1 : 0)) % 2 ? L.c1 : (L.c2 ?? col);
         else if (L.t === 'blocks' && (k === 2 || k === 3)) q = (Math.floor((zm + 10) / 0.45) + k) % 2 ? L.c1 : (L.c2 ?? WHITE);
         else if (L.t === 'racing' && k >= 9) q = L.c1;
         else if (L.t === 'twin' && k === 9) q = L.c1;
@@ -200,13 +219,14 @@ function loft(s: Spec, col: number[], d: Dress, liv?: Liv): void {
   const g = g0.toNonIndexed(); g0.dispose();
   const nTri = g.attributes['position'].count / 3, ca = new Float32Array(nTri * 9), pa = g.attributes['position'];
   for (let t = 0; t < nTri; t++) { const q = triCol[t] ?? col; for (let v = 0; v < 3; v++) { const y = pa.getY(t * 3 + v), ao = 0.72 + 0.28 * Math.min(1, Math.max(0, (y - s.sill + 0.05) / Math.max(0.2, s.belt - s.sill))); ca[t * 9 + v * 3] = q[0] * ao; ca[t * 9 + v * 3 + 1] = q[1] * ao; ca[t * 9 + v * 3 + 2] = q[2] * ao; } }
-  g.setAttribute('color', new THREE.BufferAttribute(ca, 3)); d.b[0].push(g);
+  const sa = new Float32Array(nTri * 3); for (let t = 0; t < nTri; t++) sa[t * 3] = sa[t * 3 + 1] = sa[t * 3 + 2] = surfOf(triCol[t] ?? col);
+  g.setAttribute('color', new THREE.BufferAttribute(ca, 3)); g.setAttribute('surf', new THREE.BufferAttribute(sa, 1)); d.b[0].push(g);
 }
 
 // ---------------------------------------------------------------- dressing: lamps, grilles, aero, kit, cargo
 function dress(s: Spec, col: number[], d: Dress, kind: CarKind, liv?: Liv): void {
   const f = s.L / 2, hw = s.W / 2, lite = d.lite;
-  const noseY = (z: number): number => profY(s, z), front = f - 0.02, rear = -f + 0.02;
+  const noseY = (z: number): number => profY(s, z), front = lite ? f - 0.02 : f + 0.035, rear = lite ? -f + 0.02 : -f - 0.035;
   const nTop = noseY(f - 0.06), cabOver = s.H > 2.6 && !!s.cargo;
   const lampY = Math.max(s.sill + 0.22, Math.min(nTop - (cabOver ? 0.55 : 0.09), s.belt - (s.H > 2 ? 0.25 : 0.1)));
   const fw = (s.W / 2) * planK(s, f), rw = (s.W / 2) * planK(s, -f);
@@ -550,7 +570,7 @@ function buildWheel(r: number, style: Rim, w: number, lite: boolean, rimCol?: nu
   for (const [x, y] of lite ? [pts[0], pts[3], pts[4], pts[7]] : pts) prof.push(new THREE.Vector2(x, y));
   const tyre = new THREE.LatheGeometry(prof, seg); tyre.rotateZ(Math.PI / 2); d.put(tyre, TYRE);
   if (style === 'tractor' && !lite) for (let k = 0; k < 18; k++) for (const sd of [-1, 1]) { const a = (k / 18) * Math.PI * 2 + (sd > 0 ? 0.17 : 0); const lug = new THREE.BoxGeometry(hw * 0.95, 0.07, 0.11); lug.rotateX(-sd * 0.5); lug.translate(sd * hw * 0.47, r + 0.02, 0); lug.rotateX(a); d.put(lug, TYRE); }
-  const rimC = rimCol ?? rimColour(style);
+  const rimC = (rimCol ?? rimColour(style)).slice(); if (style !== 'steel' && style !== 'tractor') ALLOY.add(rimC);
   for (const sd of lite ? [1] : [-1, 1]) {   // far LOD: outer face only (carStatic turns left-side wheels around)
     const face = sd * (hw - 0.025);
     const barrel = new THREE.CircleGeometry(rimR * 0.98, seg); barrel.rotateY((sd * Math.PI) / 2); barrel.translate(face - sd * 0.05, 0, 0); d.put(barrel, GUN);
@@ -586,10 +606,58 @@ const wheelOf = (kind: CarKind, i: number, lite: boolean, rim?: number[]): THREE
   return wheelGeo(r, s.rim, w, lite, rim);
 };
 
+/**
+ * Real materials on vertex-coloured vehicles, all in the body's one draw call: the 'surf' attribute picks the surface model per
+ * fragment. High-frequency detail (paint flake, carbon weave, tread, brushing) is computed in object space, so it stays sharp at any
+ * zoom, costs no texture memory, and fades with the pixel footprint (no shimmer, nothing spent at distance).
+ */
+function vehicleSurfaces<T extends THREE.MeshStandardMaterial>(m: T): T {
+  m.onBeforeCompile = (sh) => {
+    sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nattribute float surf; varying float vSurf; varying vec3 vObj;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvSurf = surf; vObj = position;');
+    sh.fragmentShader = sh.fragmentShader.replace('#include <common>', `#include <common>
+      varying float vSurf; varying vec3 vObj; float sId = 0.0; float sHi = 1.0;
+      float vh1(vec3 p){ p = fract(p * 0.3183099 + 0.1); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }
+      vec3 vh3(vec3 p){ return vec3(vh1(p), vh1(p + 19.19), vh1(p + 47.47)); }`)
+      .replace('#include <metalnessmap_fragment>', `#include <metalnessmap_fragment>
+      sId = floor(vSurf + 0.5);
+      vec3 oN = normalize(cross(dFdx(vObj), dFdy(vObj)));
+      float ofw = length(fwidth(vObj)); sHi = clamp(1.0 - ofw * 140.0, 0.0, 1.0);
+      vec2 tp = abs(oN.y) > 0.6 ? vObj.xz : (abs(oN.x) > 0.6 ? vObj.zy : vObj.xy);     // the face's own plane (triplanar pick)
+      if (sId == 1.0) { roughnessFactor = 0.02; metalnessFactor = 0.0; diffuseColor.rgb *= 0.8; }                                   // glass
+      else if (sId == 2.0) { roughnessFactor = 0.05; metalnessFactor = 1.0; diffuseColor.rgb = vec3(0.92, 0.93, 0.95); }            // chrome
+      else if (sId == 3.0) { roughnessFactor = 0.2; metalnessFactor = 0.0; }                                                       // gloss black trim
+      else if (sId == 4.0) { roughnessFactor = 0.82 + 0.1 * vh1(floor(vObj * 400.0)) * sHi; metalnessFactor = 0.0; }               // matte rubber / textured plastic
+      else if (sId == 5.0) {                                                                                                        // carbon fibre: 2x2 twill under lacquer
+        vec2 cp = tp * 140.0; float tow = mod(floor(cp.x) + floor(cp.y * 0.5 + floor(cp.x) * 0.5), 2.0);
+        float sheen = 0.5 + 0.5 * sin(fract(tow > 0.5 ? cp.x : cp.y) * 3.14159);
+        diffuseColor.rgb = mix(vec3(0.045), mix(vec3(0.025, 0.026, 0.03), vec3(0.11, 0.115, 0.125), sheen), sHi); roughnessFactor = mix(0.35, 0.18 + 0.15 * (1.0 - sheen), sHi); metalnessFactor = 0.2; }
+      else if (sId == 6.0) {                                                                                                        // tyre rubber: tread blocks, sidewall grain
+        float r = length(vObj.yz), ang = atan(vObj.y, vObj.z), tread = 1.0 - step(0.5, abs(oN.x));
+        float blk = step(0.78, fract(ang * 30.0 / 6.2832 + step(0.0, vObj.x) * 0.5)) + step(0.9, fract(abs(vObj.x) * 22.0));
+        diffuseColor.rgb *= mix(1.0, 1.0 - 0.55 * min(blk, 1.0), tread * sHi) * (0.92 + 0.12 * vh1(floor(vObj * 300.0)) * sHi);
+        diffuseColor.rgb += (1.0 - tread) * sHi * step(0.93, fract(r * 40.0)) * 0.015;                                            // moulded sidewall rings
+        roughnessFactor = 0.9; metalnessFactor = 0.0; }
+      else if (sId == 7.0) { float br = vh1(vec3(floor(tp.y * 900.0), 1.0, 2.0)); roughnessFactor = mix(0.42, 0.28 + 0.2 * br, sHi); metalnessFactor = 0.85; diffuseColor.rgb *= 0.9 + 0.12 * br * sHi; }   // brushed / cast metal
+      else if (sId == 8.0) { roughnessFactor = 0.35; metalnessFactor = 0.0; }                                                       // plate / vinyl
+      else if (sId == 9.0) { float rad = length(vObj.yz); roughnessFactor = 0.16 + 0.06 * step(0.5, fract(rad * 160.0)) * sHi; metalnessFactor = 1.0; }   // polished alloy, machined rings
+      `)
+      .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
+      if (sId == 0.0 && metalnessFactor > 0.25) { vec3 fl = vh3(floor(vObj * 1100.0)) - 0.5; normal = normalize(normal + fl * 0.16 * sHi); }   // metallic flakes under the clear coat
+      if (sId == 7.0 || sId == 4.0) { normal = normalize(normal + (vh3(floor(vObj * 500.0)) - 0.5) * 0.05 * sHi); }`)
+      .replace('#include <lights_physical_fragment>', `#include <lights_physical_fragment>
+      #ifdef USE_CLEARCOAT
+      material.clearcoat *= (sId == 0.0 || sId == 5.0) ? 1.0 : 0.0;
+      #endif`);
+  };
+  const key = m.type + '|veh-surf1'; m.customProgramCacheKey = () => key;
+  return m;
+}
+
 /** Glossy two-layer look without a physical material: metallic base, sky reflections from the scene environment. */
-export const carPaintMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.24, metalness: 0.5, envMapIntensity: 1.35 });
+export const carPaintMat = vehicleSurfaces(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.24, metalness: 0.5, envMapIntensity: 1.35 }));
 /** Player's own car: same vertex-coloured shell under a clear coat. */
-export const playerPaintMat = new THREE.MeshPhysicalMaterial({ vertexColors: true, roughness: 0.3, metalness: 0.5, clearcoat: 1, clearcoatRoughness: 0.04, envMapIntensity: 1.3 });
+export const playerPaintMat = vehicleSurfaces(new THREE.MeshPhysicalMaterial({ vertexColors: true, roughness: 0.3, metalness: 0.5, clearcoat: 1, clearcoatRoughness: 0.04, envMapIntensity: 1.3 }));
 export type PaintFinish = 'metallic' | 'gloss' | 'matte' | 'pearlescent';
 const finishMats = new Map<PaintFinish, THREE.MeshPhysicalMaterial>();
 /** Player paint in a chosen finish: metallic flake, solid gloss, satin matte, or a pearl that shifts colour with the angle. */
@@ -599,11 +667,11 @@ export function playerPaint(f: PaintFinish): THREE.MeshPhysicalMaterial {
     : f === 'gloss' ? new THREE.MeshPhysicalMaterial({ vertexColors: true, roughness: 0.22, metalness: 0.08, clearcoat: 1, clearcoatRoughness: 0.03, envMapIntensity: 1.2 })
     : f === 'matte' ? new THREE.MeshPhysicalMaterial({ vertexColors: true, roughness: 0.78, metalness: 0.05, clearcoat: 0, envMapIntensity: 0.6 })
     : new THREE.MeshPhysicalMaterial({ vertexColors: true, roughness: 0.26, metalness: 0.35, clearcoat: 1, clearcoatRoughness: 0.05, iridescence: 0.7, iridescenceIOR: 1.6, iridescenceThicknessRange: [180, 520], envMapIntensity: 1.35 });
-  finishMats.set(f, m); return m;
+  if (f !== 'metallic') vehicleSurfaces(m); finishMats.set(f, m); return m;
 }
 /** Lamps: unlit, so LED signatures read at any time of day (values above 1 bloom). */
 export const lampMat = new THREE.MeshBasicMaterial({ vertexColors: true });
-const wheelMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.45, metalness: 0.5, envMapIntensity: 1.1 });
+const wheelMat = vehicleSurfaces(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.45, metalness: 0.5, envMapIntensity: 1.1 }));
 
 /** Whole static vehicle (body + wheels) as one single-material geometry: parked cars. Reduced detail. */
 export function carStatic(kind: CarKind, col: number[], stripe?: number[]): THREE.BufferGeometry {

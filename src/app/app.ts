@@ -492,9 +492,9 @@ export class App implements AfterViewInit, OnDestroy {
     // Solid world: buildings, trees, poles and other cars
     const wb = this.sceneManager.worldBuilder;
     if (wb.ready) {
-      const hit = wb.collision.resolve(this.vehicle, this.sceneManager.trafficColliders(), dt, prev);
+      const hit = wb.collision.resolve(this.vehicle, [], dt, prev, this.sceneManager.carBodies());
+      if (hit.hits.length) this.sceneManager.applyCarHits(hit.hits);
       if (hit.impactSpeed > 1.2) {
-        if (hit.hitKind === 'car') this.sceneManager.hitTraffic(hit.hitId, hit.impactSpeed);
         this.crashRumble(hit.impactSpeed); this.crashNoise = Math.max(this.crashNoise, Math.min(1, hit.impactSpeed / 8));
         const f = Math.min(1, hit.impactSpeed / 16), now = performance.now();
         if (now - this.lastCrashFx > 220 || f > this.lastCrashF + 0.25) {
@@ -570,7 +570,6 @@ export class App implements AfterViewInit, OnDestroy {
 
     if (event.code === 'KeyY') { try { localStorage.setItem('shesha.style', localStorage.getItem('shesha.style') === '1' ? '0' : '1'); } catch { /* ignore */ } location.reload(); return; }
     if (event.code === 'KeyF') { this.hudComponent?.showFps.update((v) => !v); return; }
-    if (event.code === 'KeyY') { this.settings.toggleTheme(); return; }
     if (event.code === 'KeyQ') { this.settings.cycleQuality(); return; }
     if (event.code === 'KeyG') { this.envService.cycleWeather(); return; }
     if (event.code === 'KeyH') { this.hapticsService.setEnabled(!this.hapticsService.enabled()); return; }

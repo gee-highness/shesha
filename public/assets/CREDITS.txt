@@ -13,3 +13,5 @@ Aerial orthophoto of Manzini (ground texture, roof colours): "Manzini Municipali
 Satellite ground colour outside the survey: contains modified Copernicus Sentinel-2 data (2024), processed from the AWS open-data archive.
 Elevation: Copernicus DEM GLO-30 (c) DLR e.V. 2010-2014 and (c) Airbus Defence and Space GmbH 2014-2018, provided under COPERNICUS by the European Union and ESA.
 Building footprints: Microsoft Global ML Building Footprints (ODbL) where OpenStreetMap had none.
+Trees and bushes (assets/models/nature): Quaternius "Stylized Nature MegaKit" (standard/free edition), CC0 1.0, quaternius.com. Optimised (webp textures, 512 px) with glTF-Transform.
+Pedestrian characters (assets/models/people): VRoid-based bodies, looks and walk cycle from the V-Me project (gee-highness/v_me), optimised with glTF-Transform.

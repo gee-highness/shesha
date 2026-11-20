@@ -1,3 +1,4 @@
+import type { CarBody, CarHit } from '../physics/collision';
 import * as THREE from 'three';
 import { Weather } from './weather';
 import { SLOT, LAMP, setEmitter, clearEmitter } from './lamp-light';
@@ -97,6 +98,7 @@ export class SceneManager {
     this.cameraRig = new CameraRig(container.clientWidth / container.clientHeight);
 
     this.worldBuilder = new WorldBuilder();
+    this.worldBuilder.renderer = this.renderer;
     this.worldBuilder.buildWorld(this.scene);
     this.worldBuilder.shadowsOn = this.renderer.shadowMap.enabled;
     if (!this.renderer.shadowMap.enabled) this.makeBlobShadow();
@@ -453,6 +455,10 @@ export class SceneManager {
   public syncRemotes(states: Map<number, PeerState>, dt: number): void { (this.remotes ??= new RemotePlayers(this.scene)).update(states, dt, performance.now()); }
   /** Surface height under a vehicle (sent to other players so their copy of our car sits on the road). */
   public groundUnder(v: RaycastVehicle): number { return this.worldBuilder.groundHeightAt(v.position.x, v.position.z, v.position.y); }
+  /** Every other vehicle as an oriented box: traffic, racers, other players. */
+  public carBodies(): CarBody[] { return [...(this.roadTraffic?.bodies() ?? []), ...(this.race?.bodies() ?? []), ...(this.remotes?.bodies() ?? [])]; }
+  /** Hand the impulses from the player's crashes to the cars that were hit. */
+  public applyCarHits(hits: CarHit[]): void { for (const h of hits) { if (h.id < 2000) this.roadTraffic?.applyHit(h); else if (h.id < 3000) this.race?.hit(h.id, h.speed); } }
   public hitTraffic(id: number, impact: number): void { if (id >= 3000) return; if (id >= 2000) this.race?.hit(id, impact); else this.roadTraffic?.hit(id, impact); }
   public raceUpdate(dt: number, p: RacePose): void { if (this.race?.active) this.race.update(dt, p, this.baseColliders()); }
 

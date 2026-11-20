@@ -202,7 +202,7 @@ export class CityBuilder {
 
   // ------------------------------------------------------------------ light emitters (shop signs / lit windows)
   private emit: { x: number; z: number; col: number[]; s: number; r: number }[] = []; private emitGrid = new Map<number, number[]>();
-  private static readonly NEON = [[1, 0.32, 0.5], [0.3, 0.8, 1], [1, 0.74, 0.28], [0.5, 1, 0.6], [1, 0.5, 0.15], [0.75, 0.45, 1]];
+  private static readonly NEON = [[1, 0.92, 0.78], [0.95, 0.25, 0.18], [1, 0.78, 0.3], [0.92, 0.95, 1], [0.3, 0.5, 0.95], [1, 0.62, 0.25]];   // real lightbox sign colours
   private addEmitter(b: Bld, cx: number, cz: number, area: number): void {
     const use = b[0]; if (area < 90 || ![2, 3, 4, 5, 6, 9, 10, 11, 12, 15].includes(use)) return; const r = b[4] / 1000;
     const col = use === 12 ? [1, 0.98, 0.9] : use === 6 || use === 5 ? [0.9, 0.95, 1] : CityBuilder.NEON[Math.floor(r * 6) % 6];

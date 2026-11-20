@@ -211,3 +211,12 @@ Done and pushed on `ccr-cac88f1d-gkebu8` (see bullets above plus):
 
 ## v0.5.0
 - Paint shop: per-car body / accent / livery / wheel colour and finish (`services/paint.service.ts`, garage PAINT panel, Tuning > Visuals), saved in localStorage `shesha.paint`.
+
+## v0.6.0
+- Roads sunk ~20 cm with a per-tile road-mask boolean cut in the terrain shader (`world-builder.ts` bakeRoadMask, R = road SDF, G = building proximity); soil walls at road edges; concrete pavements + kerbstones everywhere in town.
+- Town ground: procedural site-plan paving (`town-ground.ts`).
+- Neon theme removed (settings theme fixed to REAL).
+- Trees: Quaternius CC0 models (`assets/models/nature`) via `forest.ts`: full models within 70 m, baked 8-view impostors beyond.
+- Vehicles: per-fragment material models (`vehicleSurfaces` in car-gen), higher-resolution lofts with rounded bumpers.
+- Collisions: oriented-box car-vs-car impulses (`boxContact`/`carImpulse` in collision.ts); hit traffic becomes a sliding rigid body (`road-traffic.ts` crashStep). Tests in `scripts/physics_test.mjs`.
+- Pedestrians: V-Me VRoid bodies + looks + walkCycle (`ped-avatars.ts`, `assets/models/people`), merged to one skinned mesh / atlas each; nearest 8 (4 on phones) within 45 m, instanced figures beyond.

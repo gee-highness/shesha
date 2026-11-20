@@ -25,6 +25,9 @@ interface WorldMeta {
 }
 interface Surf { way: RoadWay; h: number; elev: boolean; px: number; pz: number; d: number }
 import { PAVE_LIFT } from './street-constants';
+import { Forest } from './forest';
+import { TOWN_GROUND_DECL, TOWN_GROUND_APPLY } from './town-ground';
+type MaskUni = { uRoadMask: { value: THREE.Texture }; uMaskBox: { value: THREE.Vector4 }; uMaskOn: { value: number } };
 export interface RoadWay { c: number; w: number; u: number; o: number; n: string; p: number[]; sw?: number; bay?: number; dz?: number[]; br?: number; bk?: number; ms?: number; rg?: number; rb?: number }
 
 import { GeoBuf } from './geo-buf';
@@ -54,11 +57,15 @@ export class WorldBuilder {
   public bridgeGroup = new THREE.Group();
   public landmarksGroup = new THREE.Group();
   public foliageGroup = new THREE.Group();
+  /** Set by the scene manager before buildWorld: used to bake tree impostors. */
+  public renderer?: THREE.WebGLRenderer;
+  private forest?: Forest;
   public mountainBackdropGroup = new THREE.Group();
   public roadInfrastructureGroup = new THREE.Group();
   public highwayCurve = new THREE.CatmullRomCurve3([new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 0, -100)]);
 
   public ready = false;
+  public maskMs = 0;   // slowest road-mask bake so far (debug)
   public collision = new CollisionWorld();
   public meta!: WorldMeta;
   public roadWays: RoadWay[] = [];
@@ -231,7 +238,8 @@ export class WorldBuilder {
   }
 
   /** Visible road surface sits this far above the terrain (per road class). */
-  private static readonly ROAD_LIFT = [0.16, 0.16, 0.15, 0.14, 0.13, 0.12, 0.1, 0.1, 0.08, -0.3];
+  // Carriageways are sunk ~20 cm into the ground (the terrain shader cuts the ground away over them), so kerbs and pavements stand above the road like a real street.
+  private static readonly ROAD_LIFT = [-0.04, -0.04, -0.05, -0.06, -0.07, -0.08, -0.1, -0.1, -0.12, -0.3];
 
   public groundClassAt(x: number, z: number): number {
     if (!this.groundCls) return 1;
@@ -438,6 +446,7 @@ export class WorldBuilder {
   private visDirty = true; private visX = 1e9; private visZ = 1e9; private visT = 0; private shadowT = 0;
   /** Streams chunks in/out by distance. Visibility only re-evaluates after moving ~12 m or 250 ms; new chunks force a refresh. */
   public update(px: number, pz: number): void {
+    this.forest?.update(px, pz);
     this.city?.update(px, pz);
     this.updateLampLight(px, pz);
     this.streets?.updateCars(px, pz);
@@ -447,7 +456,11 @@ export class WorldBuilder {
     for (const t of this.terrainTiles) {
       const dx = Math.max(Math.abs(t.cx - px) - 640, 0), dz = Math.max(Math.abs(t.cz - pz) - 640, 0), d = Math.hypot(dx, dz);
       t.lod0.visible = d < 950 * this.detailScale;
+      if (!t.lod0.visible && t.masked && d > 1600) { this.dropRoadMask(t); t.masked = false; }
     }
+    { let best: (typeof this.terrainTiles)[number] | null = null, bd = 1e18;
+      for (const t of this.terrainTiles) if (t.lod0.visible && !t.masked) { const d = (t.cx - px) ** 2 + (t.cz - pz) ** 2; if (d < bd) { bd = d; best = t; } }
+      if (best && this.ready) { const t0 = performance.now(); this.bakeRoadMask(best); this.maskMs = Math.max(this.maskMs, performance.now() - t0); best.masked = true; this.visDirty = true; } }
     if (this.farTerrain) { // every coarse tile lives in one mesh: rewrite its index buffer with the tiles that are not shown in detail (1 draw call instead of ~140)
       const ix = this.farTerrain.geometry.index!, arr = ix.array as Uint32Array; let n = 0;
       for (const t of this.terrainTiles) if (!t.lod0.visible) { arr.set(this.farIdx.subarray(t.far[0], t.far[0] + t.far[1]), n); n += t.far[1]; }
@@ -481,6 +494,8 @@ export class WorldBuilder {
     this.bakeHeightGrid();
     this.indexRoads();
     this.relocateProps(feats as { trees?: number[][]; towers?: number[][]; tanks?: number[][] } | null);
+    { const t = new THREE.DataTexture(this.groundCls, meta.gw, meta.gh, THREE.RedFormat); t.magFilter = t.minFilter = THREE.NearestFilter; t.generateMipmaps = false; t.needsUpdate = true;
+      this.clsUni.uGroundCls.value = t; this.clsUni.uClsBox.value.set(meta.bounds[0], meta.bounds[2], meta.gw * meta.px, meta.gh * meta.px); }
     this.buildTerrain(scene, groundTex);
     this.buildRoads(scene);
     this.waterPolys = (roads.water as { p: number[] }[]).map((q) => q.p);
@@ -493,6 +508,7 @@ export class WorldBuilder {
     if (feats) { this.features = new FeaturesBuilder(this, feats as Features); this.features.build(); }
     this.flushProps();
     this.city.prime();
+    if (this.renderer) { this.forest = new Forest(this.renderer); await this.forest.load().catch(() => undefined); this.foliageGroup.add(this.forest.group); }
     this.buildTrees(scene, tbuf);
     this.buildStreetFurniture(scene);
     this.buildLabels(scene);
@@ -572,6 +588,8 @@ export class WorldBuilder {
   }
 
   // ------------------------------------------------------------------ terrain
+  /** Land-use raster for the town-ground shader (10 m cells, nearest). */
+  private clsUni = { uGroundCls: { value: null as THREE.Texture | null }, uClsBox: { value: new THREE.Vector4(0, 0, 1, 1) } };
   private orthoUni = { uOrtho: { value: null as THREE.Texture | null }, uOrthoMask: { value: null as THREE.Texture | null }, uOrthoBox: { value: new THREE.Vector4(0, 1, 0, 1) }, uOrthoOn: { value: 0 } };
   /** Aerial orthophoto ground layer (desktop only: a 4k texture is too much memory for phones). */
   private loadOrtho(): void {
@@ -588,13 +606,14 @@ export class WorldBuilder {
   private buildTerrain(scene: THREE.Scene, groundTex: THREE.Texture): void {
     this.loadOrtho();
     const detail0 = 0; void detail0;
+    const tPrevKey = 'terrain-style3';
+    const makeMat = (mask: MaskUni): THREE.MeshStandardMaterial => {
     const mat = new THREE.MeshStandardMaterial({ map: groundTex, roughness: 0.95, metalness: 0 });
-    const tPrevKey = 'terrain-style';
     mat.onBeforeCompile = (sh) => {
       sh.uniforms['uNoise'] = { value: noiseTex() };
       sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vW;')
         .replace('#include <begin_vertex>', '#include <begin_vertex>\nvW = (modelMatrix * vec4(transformed,1.0)).xyz;');
-      sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nvarying vec3 vW;\n' + STYLE_FUNCS)
+      sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nvarying vec3 vW;\n' + STYLE_FUNCS + TOWN_GROUND_DECL)
         .replace('#include <map_fragment>', `#include <map_fragment>
           float l1 = 0.12 + 0.5 * sfbm(vW.xz*0.21 + 3.0), l2 = sfbm(vW.xz*0.0113 + 7.0);
           float sat = max(diffuseColor.r, max(diffuseColor.g, diffuseColor.b)) - min(diffuseColor.r, min(diffuseColor.g, diffuseColor.b));
@@ -612,19 +631,72 @@ export class WorldBuilder {
               vec3 oc = texture2D(uOrtho, ouv).rgb * (0.9 + 0.22 * sfbm(vW.xz * 1.9 + 11.0));   // sub-pixel grain so it never looks smeared up close
               diffuseColor.rgb = mix(diffuseColor.rgb, oc, om);
             }
-          }`);
-      sh.fragmentShader = sh.fragmentShader.replace('varying vec3 vW;', 'varying vec3 vW;\nuniform sampler2D uOrtho; uniform sampler2D uOrthoMask; uniform vec4 uOrthoBox; uniform float uOrthoOn;');
-      Object.assign(sh.uniforms, this.orthoUni);
+          }
+          ${TOWN_GROUND_APPLY}`);
+      sh.fragmentShader = sh.fragmentShader.replace('varying vec3 vW;', 'varying vec3 vW;\nuniform sampler2D uOrtho; uniform sampler2D uOrthoMask; uniform vec4 uOrthoBox; uniform float uOrthoOn;\nuniform sampler2D uRoadMask; uniform vec4 uMaskBox; uniform float uMaskOn;')
+        // boolean cut: no ground over a sunken carriageway (mask = signed distance to the road edge, baked per tile)
+        .replace('#include <clipping_planes_fragment>', `#include <clipping_planes_fragment>
+          if (uMaskOn > 0.5) { vec2 muv = (vW.xz - uMaskBox.xy) / uMaskBox.zw; if (muv.x > 0.0 && muv.y > 0.0 && muv.x < 1.0 && muv.y < 1.0 && texture2D(uRoadMask, muv).r > 0.5) discard; }`);
+      Object.assign(sh.uniforms, this.orthoUni, this.clsUni, mask);
     };
     mat.customProgramCacheKey = () => tPrevKey; addLampLight(mat);
-    this.buildTerrainTiles(scene, mat);
+    return mat;
+    };
+    this.buildTerrainTiles(scene, makeMat);
   }
 
-  public terrainTiles: { lod0: THREE.Mesh; far: [number, number]; cx: number; cz: number }[] = [];
+  public terrainTiles: { lod0: THREE.Mesh; far: [number, number]; cx: number; cz: number; x0: number; z0: number; masked?: boolean; maskT?: number }[] = [];
+  private static blankMask = (() => { const t = new THREE.DataTexture(new Uint8Array([0]), 1, 1, THREE.RedFormat); t.needsUpdate = true; return t; })();
+  private static maskUni(): MaskUni { return { uRoadMask: { value: WorldBuilder.blankMask }, uMaskBox: { value: new THREE.Vector4(0, 0, 1, 1) }, uMaskOn: { value: 0 } }; }
+  private static readonly MASK_SIZE = 1280; private static readonly MASK_RES = 1;   // metres per tile, metres per texel
+
+  /**
+   * Bake one terrain tile's road mask: every sunken carriageway is stroked as a banded signed-distance field (lighten = max), so
+   * bilinear sampling finds the road edge to ~0.1 m from a 1 m texel. Value 0.5 = exactly the road edge.
+   */
+  private bakeRoadMask(t: { lod0: THREE.Mesh; x0: number; z0: number }): void {
+    const S = WorldBuilder.MASK_SIZE, R = WorldBuilder.MASK_RES, N = S / R, X0 = t.x0, Z0 = t.z0, mask = t.lod0.userData['mask'] as MaskUni;
+    const cv = document.createElement('canvas'); cv.width = N; cv.height = N; const g = cv.getContext('2d', { willReadFrequently: true })!;
+    g.fillStyle = '#000'; g.fillRect(0, 0, N, N); g.globalCompositeOperation = 'lighten'; g.lineCap = 'round'; g.lineJoin = 'round';
+    const RANGE = 1.0, BANDS = 8; let any = false;
+    for (const w of this.roadWays) {
+      if (w.c === 9) continue; const p = w.p, hw = w.w / 2, dz = w.dz;
+      let bx0 = 1e9, bx1 = -1e9, bz0 = 1e9, bz1 = -1e9; for (let i = 0; i < p.length; i += 2) { bx0 = Math.min(bx0, p[i] / 10); bx1 = Math.max(bx1, p[i] / 10); bz0 = Math.min(bz0, p[i + 1] / 10); bz1 = Math.max(bz1, p[i + 1] / 10); }
+      if (bx1 < X0 - 10 || bx0 > X0 + S + 10 || bz1 < Z0 - 10 || bz0 > Z0 + S + 10) continue;
+      for (let b = 0; b < BANDS; b++) {
+        const d = RANGE - ((b + 0.5) / BANDS) * 2 * RANGE, half = hw + 0.02 + d; if (half <= 0.05) continue;   // widest stroke = lowest value
+        const v = Math.round(Math.max(0, Math.min(1, 0.5 - d / (2 * RANGE))) * 255);
+        g.strokeStyle = `rgb(${v},0,0)`; g.lineWidth = (2 * half) / R; g.beginPath(); let pen = false;
+        for (let i = 0; i < p.length; i += 2) {
+          const x = (p[i] / 10 - X0) / R, y = (p[i + 1] / 10 - Z0) / R, deck = dz ? dz[i / 2] / 10 > 0.25 : false;
+          if (deck) { pen = false; continue; }   // overpass decks stand clear of the ground: no cut under them
+          if (pen) g.lineTo(x, y); else { g.moveTo(x, y); pen = true; }
+        }
+        g.stroke(); any = true;
+      }
+    }
+    // building-proximity field (green): 1 inside the footprint, apron to ~2 m, yard / driveway out to ~7 m
+    for (let a = Math.floor((X0 - 20) / 40); a <= Math.floor((X0 + S + 20) / 40); a++) for (let b = Math.floor((Z0 - 20) / 40); b <= Math.floor((Z0 + S + 20) / 40); b++) {
+      const l = this.bGrid.get(a * 100003 + b); if (!l) continue;
+      for (let k = 0; k < l.length; k += 3) {
+        const r = Math.max(1.5, l[k + 2] - 1.5), R2 = r + 7, x = (l[k] - X0) / R, y = (l[k + 1] - Z0) / R;
+        const gr = g.createRadialGradient(x, y, 0, x, y, R2 / R); gr.addColorStop(0, 'rgb(0,255,0)'); gr.addColorStop(r / R2, 'rgb(0,242,0)'); gr.addColorStop((r + 2) / R2, 'rgb(0,140,0)'); gr.addColorStop(1, 'rgb(0,0,0)');
+        g.fillStyle = gr; g.fillRect(x - R2 / R, y - R2 / R, (2 * R2) / R, (2 * R2) / R); any = true;
+      }
+    }
+    if (!any) { mask.uMaskOn.value = 0; return; }
+    const img = g.getImageData(0, 0, N, N).data, rg = new Uint8Array(N * N * 2); for (let i = 0; i < N * N; i++) { rg[i * 2] = img[i * 4]; rg[i * 2 + 1] = img[i * 4 + 1]; }
+    const tex = new THREE.DataTexture(rg, N, N, THREE.RGFormat); tex.magFilter = THREE.LinearFilter; tex.minFilter = THREE.LinearFilter; tex.generateMipmaps = false; tex.needsUpdate = true;
+    if (mask.uRoadMask.value !== WorldBuilder.blankMask) mask.uRoadMask.value.dispose();
+    mask.uRoadMask.value = tex; mask.uMaskBox.value.set(X0, Z0, S, S); mask.uMaskOn.value = 1;
+  }
+  /** Free the masks of tiles that are far away (keeps GPU memory flat on phones). */
+  private dropRoadMask(t: { lod0: THREE.Mesh }): void { const m = t.lod0.userData['mask'] as MaskUni; if (m.uRoadMask.value !== WorldBuilder.blankMask) m.uRoadMask.value.dispose(); m.uRoadMask.value = WorldBuilder.blankMask; m.uMaskOn.value = 0; }
   private farTerrain?: THREE.Mesh; private farIdx = new Uint32Array(0);
 
   /** 1280 m tiles, each with a fine (40 m) and a coarse (320 m) mesh; skirts hide LOD seams. */
-  private buildTerrainTiles(scene: THREE.Scene, mat: THREE.Material): void {
+  private buildTerrainTiles(scene: THREE.Scene, makeMat: (m: MaskUni) => THREE.Material): void {
+    const farMask = WorldBuilder.maskUni(); const farMat = makeMat(farMask);
     const [x0, , z0] = this.meta.bounds, S = this.TS, nx = this.tnx, nz = this.tnz, TC = Math.round(1280 / S), CS = Math.round(320 / S);
     const W = this.meta.gw * this.meta.px, Hh = this.meta.gh * this.meta.px;
     const H = (i: number, j: number) => this.tH[Math.max(0, Math.min(nz - 1, j)) * nx + Math.max(0, Math.min(nx - 1, i))];
@@ -670,16 +742,16 @@ export class WorldBuilder {
       const g = new THREE.BufferGeometry();
       g.setAttribute('position', new THREE.BufferAttribute(pos, 3)); g.setAttribute('normal', new THREE.BufferAttribute(nor, 3)); g.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
       g.setIndex(new THREE.BufferAttribute(new Uint32Array(idx), 1)); g.computeBoundingSphere();
-      const m = new THREE.Mesh(g, mat); m.name = 'terrain'; m.receiveShadow = true; m.visible = false; scene.add(m); return m;
+      const mask = WorldBuilder.maskUni(); const m = new THREE.Mesh(g, makeMat(mask)); m.name = 'terrain'; m.userData['mask'] = mask; m.receiveShadow = true; m.visible = false; scene.add(m); return m;
     };
     for (let j0 = 0; j0 < nz - 1; j0 += TC) for (let i0 = 0; i0 < nx - 1; i0 += TC) {
-      make(i0, j0, CS); this.terrainTiles.push({ lod0: make(i0, j0, 1), far: lastFar, cx: x0 + (i0 + TC / 2) * S, cz: z0 + (j0 + TC / 2) * S });
+      make(i0, j0, CS); this.terrainTiles.push({ lod0: make(i0, j0, 1), far: lastFar, cx: x0 + (i0 + TC / 2) * S, cz: z0 + (j0 + TC / 2) * S, x0: x0 + i0 * S, z0: z0 + j0 * S });
     }
     {
       const g = new THREE.BufferGeometry(); this.farIdx = new Uint32Array(fi);
       g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(fp), 3)); g.setAttribute('normal', new THREE.BufferAttribute(new Float32Array(fn), 3)); g.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(fu), 2));
       const ib = new THREE.BufferAttribute(new Uint32Array(fi), 1); ib.setUsage(THREE.DynamicDrawUsage); g.setIndex(ib);
-      const m = new THREE.Mesh(g, mat); m.name = 'terrain-far'; m.receiveShadow = false; m.frustumCulled = false; scene.add(m); this.farTerrain = m;
+      const m = new THREE.Mesh(g, farMat); m.name = 'terrain-far'; m.receiveShadow = false; m.frustumCulled = false; scene.add(m); this.farTerrain = m;
     }
     this.terrainMesh = this.terrainTiles[0].lod0;
   }
@@ -759,6 +831,19 @@ export class WorldBuilder {
         const qy = [yl[i], yr[i], yl[i + 1], yr[i + 1]];
         const ids = q.map((p, qi) => buf.vert(p[0], qy[qi], p[1], 0, 1, 0, p[0], p[1], [1, 1, 1]));
         buf.tri(ids[0], ids[2], ids[1]); buf.tri(ids[1], ids[2], ids[3]);
+        // the cut's side walls: soil from the sunken road edge up to the surrounding ground (pavement kerbs stand just outside them)
+        if (!isWater && dzs[i] <= 0.25 && dzs[i + 1] <= 0.25) {
+          const wb = this.chunkOf(map, mx, mz, 'dirt', RC);
+          for (const [E, ye, O] of [[L, yl, R], [R, yr, L]] as [[number, number][], number[], [number, number][]][]) {
+            const nx = O[i][0] - E[i][0], nz = O[i][1] - E[i][1], nl = Math.hypot(nx, nz) || 1, ux = nx / nl, uz = nz / nl;   // faces the road
+            const ta = this.calculateRawTerrainHeight(E[i][0], E[i][1]) + 0.03, tb = this.calculateRawTerrainHeight(E[i + 1][0], E[i + 1][1]) + 0.03;
+            if (ta <= ye[i] && tb <= ye[i + 1]) continue;
+            const v0 = wb.vert(E[i][0], ye[i], E[i][1], ux, 0, uz, E[i][0], ye[i], [1, 1, 1]), v1 = wb.vert(E[i + 1][0], ye[i + 1], E[i + 1][1], ux, 0, uz, E[i + 1][0], ye[i + 1], [1, 1, 1]);
+            const v2 = wb.vert(E[i + 1][0], tb, E[i + 1][1], ux, 0, uz, E[i + 1][0], tb, [1, 1, 1]), v3 = wb.vert(E[i][0], ta, E[i][1], ux, 0, uz, E[i][0], ta, [1, 1, 1]);
+            const ex = E[i + 1][0] - E[i][0], ez = E[i + 1][1] - E[i][1];                                   // wind so the face points at the road
+            if (ex * uz - ez * ux > 0) { wb.tri(v0, v1, v2); wb.tri(v0, v2, v3); } else { wb.tri(v0, v2, v1); wb.tri(v0, v3, v2); }
+          }
+        }
         if (w.c <= 4 && !isDirt) {
           const mb = this.chunkOf(map, mx, mz, 'mark', RC); const uo = dash ? 0.5 : 0;
           const mid = [mb.vert(L[i][0], yl[i] + 0.02, L[i][1], 0, 1, 0, uo, cum / 12, [1, 1, 1]),
@@ -830,8 +915,22 @@ export class WorldBuilder {
       const k = `${sp}:${Math.floor(x / TCH)},${Math.floor(z / TCH)}`; let l = byChunk.get(k); if (!l) { l = []; byChunk.set(k, l); } l.push({ x, z, c, sp });
     }
     const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), col = new THREE.Color();
+    const forest = this.forest?.ready ? this.forest : null;
     byChunk.forEach((list, key) => {
-      const sp = list[0].sp; const im = new THREE.InstancedMesh(sp === 1 ? geoCon : sp === 2 ? geoPalm : geo, mat, list.length); im.name = 'trees'; im.castShadow = true;
+      const sp = list[0].sp;
+      if (forest && sp !== 2) {   // real CC0 tree models: impostors here, full models streamed in around the player
+        const spots = list.map((t) => {
+          const h = WorldBuilder.hash(t.x * 5, t.z * 7), r = WorldBuilder.hash(t.x, t.z), k = WorldBuilder.hash(t.z * 3, t.x * 2);
+          const si = sp === 1 ? (k < 0.5 ? 3 : 4) : h < 0.14 ? 5 : k < 0.4 ? 0 : k < 0.75 ? 1 : 2;
+          const s = (si === 5 ? 0.62 : si >= 3 ? 1.05 : 0.95) * (0.8 + r * 0.45) * (t.c === 5 ? 1.3 : 1);
+          const g = 0.88 + WorldBuilder.hash(t.x * 2, t.z * 3) * 0.24;
+          return { x: t.x, y: this.calculateRawTerrainHeight(t.x, t.z) - 0.1, z: t.z, rot: WorldBuilder.hash(t.z, t.x) * 6.28, s, sp: si, tint: new THREE.Color(g, g, g) };
+        });
+        const im = forest.impostors(spots); im.userData['far'] = 700;
+        const [cxI, czI] = key.split(':')[1].split(',').map(Number);
+        im.visible = false; this.visDirty = true; this.chunks.push({ obj: im, cx: (cxI + 0.5) * TCH, cz: (czI + 0.5) * TCH, r: TCH * 0.75, half: TCH / 2 });
+        this.foliageGroup.add(im); return;
+      } const im = new THREE.InstancedMesh(sp === 1 ? geoCon : sp === 2 ? geoPalm : geo, mat, list.length); im.name = 'trees'; im.castShadow = true;
       list.forEach((t, i) => {
         const s = (sp === 2 ? 0.85 : 0.7) + WorldBuilder.hash(t.x, t.z) * (sp === 2 ? 0.4 : 0.9);
         q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), WorldBuilder.hash(t.z, t.x) * 6.28);
@@ -841,7 +940,7 @@ export class WorldBuilder {
         if (sp === 2) return;                                                           // palm keeps its baked colours
         // Manzini's real street trees: green canopies, flamboyants (red-orange) and jacarandas (violet); blossom runs above 1 so it glows
         const hk = WorldBuilder.hash(t.x * 5, t.z * 7), sh = 0.85 + r * 0.3;
-        const pc = sp === 1 ? [0.16, 0.42, 0.2] : hk < 0.14 ? [1.4, 0.3, 0.1] : hk < 0.25 ? [0.72, 0.46, 1.35] : hk < 0.5 ? [0.16, 0.42, 0.17] : hk < 0.75 ? [0.23, 0.53, 0.2] : [0.12, 0.34, 0.16];
+        const pc = sp === 1 ? [0.16, 0.42, 0.2] : hk < 0.14 ? [0.78, 0.24, 0.08] : hk < 0.25 ? [0.5, 0.4, 0.72] : hk < 0.5 ? [0.16, 0.42, 0.17] : hk < 0.75 ? [0.23, 0.53, 0.2] : [0.12, 0.34, 0.16];
         col.setRGB(pc[0] * sh, pc[1] * sh, pc[2] * sh);
         im.setColorAt(i, col);
       });

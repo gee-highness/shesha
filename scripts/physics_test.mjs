@@ -109,3 +109,25 @@ for (const id of ['RWD_DRIFT', 'AWD_GRIP']) {
   console.log('handbrake @60: rear wheel speed %s rad/s (locked = 0), peak yaw rate %s rad/s', v.wheels[2].angularVelocityRadS.toFixed(1), yaw.toFixed(2)); }
 { const v = mk('AWD_GRIP'); v.position.y = 3; v.throttle = 1; for (let i = 0; i < 0.3 / DT; i++) v.updatePhysics(DT, ground);
   console.log('throttle in the air: driven wheels spin to %s rad/s, rpm %s', v.wheels[0].angularVelocityRadS.toFixed(0), v.currentRpm.toFixed(0)); }
+
+// ---------------- car vs car (oriented boxes, shared impulses)
+console.log('\n== car vs car');
+{ const { yawInertia } = await import('../.phys/game/physics/collision.js');
+  const run = (label, setup, steps = 90) => {
+    const cw = new CollisionWorld(); const v = mk('AWD_GRIP'); settle(v, 1); v.position.set(0, 0.35, 0);
+    const b = { id: 7, x: 0, z: 8, yaw: 0, hl: 2.3, hw: 0.95, vx: 0, vz: 0, w: 0, mass: 1400 }; setup(v, b);
+    const p0 = v.velocity.clone().multiplyScalar(v.config.massKg).add(new THREE.Vector3(b.vx * b.mass, 0, b.vz * b.mass)); let maxW = 0, hit = 0;
+    for (let i = 0; i < steps; i++) {
+      v.updatePhysics(DT, ground); const pb = v.velocity.clone().multiplyScalar(v.config.massKg).add(new THREE.Vector3(b.vx * b.mass, 0, b.vz * b.mass));
+      const r = cw.resolve(v, [], DT, undefined, [b]);
+      if (r.hits.length && !hit) { const pa = v.velocity.clone().multiplyScalar(v.config.massKg).add(new THREE.Vector3(b.vx * b.mass + r.hits[0].jx, 0, b.vz * b.mass + r.hits[0].jz)); console.log('   momentum through the impact step: %s kg m/s change (of %s)', pa.sub(pb).length().toFixed(1), pb.length().toFixed(0)); }
+      for (const h of r.hits) { b.vx += h.jx / b.mass; b.vz += h.jz / b.mass; b.w += ((h.pz - b.z) * h.jx - (h.px - b.x) * h.jz) / yawInertia(b); b.x += h.sx; b.z += h.sz; hit = Math.max(hit, h.speed); }
+      b.x += b.vx * DT; b.z += b.vz * DT; b.yaw += b.w * DT; maxW = Math.max(maxW, Math.abs(b.w));
+    }
+    console.log('%s: impact %s m/s, us %s km/h, them %s km/h, their peak spin %s rad/s, gap ok %s', label, hit.toFixed(1), kmh(v).toFixed(0), (Math.hypot(b.vx, b.vz) * 3.6).toFixed(0), maxW.toFixed(2), boxOk(v, b));
+  };
+  const boxOk = (v, b) => Math.hypot(v.position.x - b.x, v.position.z - b.z) > 1.0;
+  run('rear-end 50 km/h into a parked car', (v, b) => { v.velocity.set(0, 0, 13.9); }, 90);
+  run('T-bone 50 km/h into its rear door', (v, b) => { v.velocity.set(0, 0, 13.9); b.yaw = Math.PI / 2; b.x = 1.2; }, 90);
+  run('offset head-on, both 40 km/h', (v, b) => { v.velocity.set(0, 0, 11.1); b.yaw = Math.PI; b.vz = -11.1; b.x = 1.0; }, 90);
+}
